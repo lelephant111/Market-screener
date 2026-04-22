@@ -6,17 +6,17 @@ from data import get_stock_info
 
 
 C = {
-    "green": "#35d399",
-    "orange": "#fbbf24",
-    "red": "#fb7185",
-    "blue": "#7dd3fc",
-    "text": "#e6eef8",
-    "muted": "#8fa6c1",
-    "border": "#21324a",
-    "card": "#0d1726",
-    "row": "#142238",
-    "bg": "#07111f",
-    "panel": "#111d31",
+    "green": "#00C896",
+    "orange": "#FF6600",
+    "red": "#E8394A",
+    "blue": "#4A9EFF",
+    "text": "#E8EEF7",
+    "muted": "#6B7FA0",
+    "border": "#1E3050",
+    "card": "#0C1220",
+    "row": "#101928",
+    "bg": "#060B14",
+    "panel": "#0F1825",
 }
 
 WATCHLIST_PATH = Path(__file__).with_name("watchlist.json")
@@ -44,62 +44,43 @@ def apply_theme() -> None:
         """
         <style>
         :root {
-            --bg: #07111f;
-            --bg-soft: #0b1422;
-            --panel: #0d1726;
-            --panel-2: #111d31;
-            --line: #21324a;
-            --line-soft: rgba(143, 166, 193, 0.14);
-            --line-strong: rgba(125, 211, 252, 0.24);
-            --text: #e6eef8;
-            --muted: #8fa6c1;
-            --blue: #7dd3fc;
-            --blue-strong: #4f8cff;
-            --green: #35d399;
-            --red: #fb7185;
-            --orange: #fbbf24;
-            --shadow: 0 18px 40px rgba(3, 8, 20, 0.28);
+            --bg: #060B14;
+            --panel: #0C1220;
+            --panel-2: #0F1825;
+            --line: #1E3050;
+            --line-soft: rgba(30, 48, 80, 0.8);
+            --line-strong: rgba(255, 102, 0, 0.5);
+            --text: #E8EEF7;
+            --muted: #6B7FA0;
+            --orange: #FF6600;
+            --orange-dim: rgba(255, 102, 0, 0.12);
+            --blue: #4A9EFF;
+            --green: #00C896;
+            --red: #E8394A;
+            --shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
         }
 
-        html, body {
-            color-scheme: dark;
-        }
+        html, body { color-scheme: dark; }
 
-        #MainMenu, footer {
-            visibility: hidden;
-        }
-
-        [data-testid="stDecoration"] {
-            display: none;
-        }
+        #MainMenu, footer { visibility: hidden; }
+        [data-testid="stDecoration"] { display: none; }
 
         html, body, [class*="css"] {
-            font-family: "Avenir Next", "SF Pro Display", "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+            font-family: "SF Mono", "JetBrains Mono", "Fira Mono", "Consolas", monospace;
         }
 
         .stApp {
-            background:
-                radial-gradient(circle at 12% 8%, rgba(125, 211, 252, 0.15), transparent 24%),
-                radial-gradient(circle at 88% 14%, rgba(53, 211, 153, 0.10), transparent 18%),
-                radial-gradient(circle at 50% 100%, rgba(79, 140, 255, 0.10), transparent 28%),
-                linear-gradient(180deg, #07111f 0%, #091321 50%, #07101c 100%);
+            background: var(--bg);
             color: var(--text);
         }
 
-        [data-testid="stAppViewContainer"] {
-            background: transparent !important;
-        }
-
+        [data-testid="stAppViewContainer"] { background: transparent !important; }
         [data-testid="stHeader"] {
             background: transparent !important;
             visibility: visible !important;
             height: 0 !important;
         }
-
-        [data-testid="stToolbar"] {
-            right: 1rem;
-        }
-
+        [data-testid="stToolbar"] { right: 1rem; }
         [data-testid="collapsedControl"] {
             display: flex !important;
             visibility: visible !important;
@@ -108,85 +89,75 @@ def apply_theme() -> None:
         }
 
         [data-testid="stSidebar"] {
-            background: linear-gradient(180deg, rgba(7, 17, 31, 0.97) 0%, rgba(10, 21, 38, 0.98) 100%) !important;
+            background: #070D18 !important;
             border-right: 1px solid var(--line) !important;
         }
+        [data-testid="stSidebar"] > div:first-child { background: transparent !important; }
 
-        [data-testid="stSidebar"] > div:first-child {
-            background: transparent !important;
-        }
-
-        [data-testid="stSidebarNav"] {
-            padding-top: 1rem;
-        }
+        [data-testid="stSidebarNav"] { padding-top: 1rem; }
 
         [data-testid="stSidebarNav"]::before {
-            content: "Hedge Fund Tool";
+            content: "MARKET TERMINAL";
             display: block;
-            padding: 0 0.35rem 0.9rem 0.35rem;
-            color: var(--text);
-            font-size: 1.1rem;
+            padding: 0 0.5rem 1rem 0.5rem;
+            color: var(--orange);
+            font-size: 0.75rem;
             font-weight: 700;
-            letter-spacing: -0.03em;
+            letter-spacing: 0.2em;
+            text-transform: uppercase;
+            border-bottom: 1px solid var(--line);
+            margin-bottom: 0.5rem;
         }
 
-        [data-testid="stSidebarNav"] ul {
-            gap: 0.35rem;
-        }
-
-        [data-testid="stSidebarNav"] li {
-            margin: 0.05rem 0;
-        }
+        [data-testid="stSidebarNav"] ul { gap: 0.2rem; }
+        [data-testid="stSidebarNav"] li { margin: 0.05rem 0; }
 
         [data-testid="stSidebarNav"] a {
-            background: rgba(17, 29, 49, 0.72);
-            border: 1px solid var(--line-soft);
-            border-radius: 14px;
-            transition: transform 0.16s ease, border-color 0.16s ease, background 0.16s ease;
+            background: transparent;
+            border: 1px solid transparent;
+            border-radius: 4px;
+            transition: background 0.12s ease, border-color 0.12s ease;
         }
-
         [data-testid="stSidebarNav"] a:hover {
-            background: rgba(17, 29, 49, 0.92);
-            border-color: var(--line-strong);
-            transform: translateX(2px);
+            background: rgba(255, 102, 0, 0.08);
+            border-color: rgba(255, 102, 0, 0.2);
         }
-
         [data-testid="stSidebarNav"] a[aria-current="page"] {
-            background: linear-gradient(135deg, rgba(125, 211, 252, 0.16) 0%, rgba(79, 140, 255, 0.18) 100%);
-            border-color: rgba(125, 211, 252, 0.28);
+            background: var(--orange-dim);
+            border-color: rgba(255, 102, 0, 0.35);
+            border-left: 2px solid var(--orange);
         }
-
         [data-testid="stSidebarNav"] span {
             color: var(--text) !important;
-            font-weight: 600;
+            font-weight: 500;
+            font-size: 0.82rem;
+            letter-spacing: 0.04em;
         }
 
         .block-container {
             max-width: 1460px;
-            padding-top: 1.4rem !important;
-            padding-bottom: 2.2rem !important;
+            padding-top: 1.2rem !important;
+            padding-bottom: 2rem !important;
         }
 
         h1 {
-            font-size: 2.1rem !important;
+            font-size: 1.6rem !important;
             font-weight: 700 !important;
             color: var(--text) !important;
-            letter-spacing: -0.05em !important;
+            letter-spacing: -0.02em !important;
             margin: 0 !important;
             padding-bottom: 0 !important;
         }
 
         h2, h3 {
-            font-size: 0.77rem !important;
+            font-size: 0.68rem !important;
             font-weight: 700 !important;
             text-transform: uppercase !important;
-            letter-spacing: 0.16em !important;
+            letter-spacing: 0.2em !important;
             color: var(--muted) !important;
         }
 
-        .stApp p, .stApp li, .stApp label, .stApp td, .stApp th {
-            color: var(--text);
-        }
+        .stApp p, .stApp li, .stApp label, .stApp td, .stApp th { color: var(--text); }
 
         .stCaption,
         [data-testid="stCaptionContainer"],
@@ -196,71 +167,58 @@ def apply_theme() -> None:
         }
 
         .page-hero {
-            position: relative;
-            overflow: hidden;
-            background: linear-gradient(135deg, rgba(125, 211, 252, 0.14) 0%, rgba(17, 29, 49, 0.94) 32%, rgba(13, 23, 38, 0.98) 100%);
-            border: 1px solid rgba(125, 211, 252, 0.18);
-            border-radius: 26px;
-            padding: 1.2rem 1.35rem 1.1rem 1.35rem;
-            margin: 0 0 1.15rem 0;
-            box-shadow: var(--shadow);
-        }
-
-        .page-hero::after {
-            content: "";
-            position: absolute;
-            inset: auto -40px -60px auto;
-            width: 220px;
-            height: 220px;
-            border-radius: 999px;
-            background: radial-gradient(circle, rgba(53, 211, 153, 0.18) 0%, rgba(53, 211, 153, 0) 72%);
-            pointer-events: none;
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-left: 3px solid var(--orange);
+            border-radius: 4px;
+            padding: 1rem 1.2rem;
+            margin: 0 0 1rem 0;
         }
 
         .page-hero__kicker {
             display: inline-flex;
             align-items: center;
             gap: 0.4rem;
-            font-size: 0.72rem;
+            font-size: 0.65rem;
             font-weight: 700;
             text-transform: uppercase;
-            letter-spacing: 0.16em;
-            color: var(--blue);
-            margin-bottom: 0.35rem;
+            letter-spacing: 0.2em;
+            color: var(--orange);
+            margin-bottom: 0.3rem;
         }
 
         .page-hero p {
             max-width: 760px;
-            margin: 0.35rem 0 0 0;
-            color: rgba(230, 238, 248, 0.78) !important;
-            font-size: 0.98rem;
-            line-height: 1.55;
+            margin: 0.3rem 0 0 0;
+            color: var(--muted) !important;
+            font-size: 0.82rem;
+            line-height: 1.5;
         }
 
         [data-testid="metric-container"] {
-            background: linear-gradient(180deg, rgba(13, 23, 38, 0.92) 0%, rgba(17, 29, 49, 0.96) 100%);
-            border: 1px solid var(--line-soft);
-            border-radius: 18px;
-            padding: 16px 18px !important;
-            box-shadow: var(--shadow);
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-top: 2px solid var(--orange);
+            border-radius: 4px;
+            padding: 14px 16px !important;
         }
 
         [data-testid="stMetricLabel"] {
-            font-size: 11px !important;
+            font-size: 10px !important;
             color: var(--muted) !important;
             text-transform: uppercase;
-            letter-spacing: 0.12em;
+            letter-spacing: 0.16em;
         }
 
         [data-testid="stMetricValue"] {
-            font-size: 1.25rem !important;
+            font-size: 1.2rem !important;
             font-weight: 700 !important;
             color: var(--text) !important;
         }
 
         hr {
-            border-color: rgba(143, 166, 193, 0.12) !important;
-            margin: 1.15rem 0 !important;
+            border-color: var(--line) !important;
+            margin: 1rem 0 !important;
         }
 
         [data-testid="stTextInput"] input,
@@ -268,115 +226,94 @@ def apply_theme() -> None:
         [data-testid="stNumberInput"] input,
         [data-testid="stSelectbox"] div[data-baseweb="select"] > div,
         [data-testid="stMultiSelect"] div[data-baseweb="select"] > div {
-            background: rgba(13, 23, 38, 0.96) !important;
+            background: var(--panel) !important;
             border: 1px solid var(--line) !important;
-            border-radius: 14px !important;
+            border-radius: 4px !important;
             color: var(--text) !important;
-            min-height: 46px;
+            min-height: 42px;
             box-shadow: none !important;
         }
 
-        input::placeholder,
-        textarea::placeholder {
-            color: rgba(143, 166, 193, 0.65) !important;
+        input::placeholder, textarea::placeholder {
+            color: var(--muted) !important;
         }
 
-        div[data-baseweb="select"] * {
-            color: var(--text) !important;
-        }
+        div[data-baseweb="select"] * { color: var(--text) !important; }
 
         div[role="listbox"] {
-            background: #0d1726 !important;
+            background: var(--panel-2) !important;
             border: 1px solid var(--line) !important;
-            border-radius: 14px !important;
-            box-shadow: var(--shadow) !important;
+            border-radius: 4px !important;
         }
 
-        div[role="option"] {
-            color: var(--text) !important;
-        }
-
-        div[role="option"]:hover {
-            background: rgba(125, 211, 252, 0.10) !important;
-        }
+        div[role="option"] { color: var(--text) !important; }
+        div[role="option"]:hover { background: var(--orange-dim) !important; }
 
         .stButton > button,
         [data-testid="stBaseButton-secondary"] {
-            background: linear-gradient(135deg, rgba(125, 211, 252, 0.22) 0%, rgba(79, 140, 255, 0.30) 100%);
+            background: transparent;
             color: var(--text);
-            border: 1px solid rgba(125, 211, 252, 0.22);
-            border-radius: 14px;
-            min-height: 44px;
-            padding: 0.55rem 1rem;
-            font-weight: 700;
-            letter-spacing: 0.01em;
-            box-shadow: 0 12px 26px rgba(8, 19, 33, 0.28);
-            transition: transform 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
+            border: 1px solid var(--line);
+            border-radius: 4px;
+            min-height: 40px;
+            padding: 0.45rem 1rem;
+            font-weight: 600;
+            font-size: 0.8rem;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            transition: border-color 0.12s ease, background 0.12s ease;
         }
 
         .stButton > button:hover,
         [data-testid="stBaseButton-secondary"]:hover {
-            border-color: rgba(125, 211, 252, 0.44);
+            border-color: var(--orange);
+            background: var(--orange-dim);
             color: white;
-            transform: translateY(-1px);
-            box-shadow: 0 16px 30px rgba(10, 22, 40, 0.34);
         }
 
         [data-testid="stPageLink"] a {
-            background: rgba(17, 29, 49, 0.72);
-            border: 1px solid var(--line-soft);
-            border-radius: 14px;
-            padding: 0.72rem 0.9rem;
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 4px;
+            padding: 0.65rem 0.9rem;
+            transition: border-color 0.12s ease, background 0.12s ease;
         }
-
         [data-testid="stPageLink"] a:hover {
-            border-color: var(--line-strong);
-            background: rgba(17, 29, 49, 0.92);
+            border-color: var(--orange);
+            background: var(--orange-dim);
         }
-
         [data-testid="stPageLink"] p {
             color: var(--text) !important;
-            font-weight: 600;
+            font-weight: 500;
+            font-size: 0.82rem;
         }
 
         [data-testid="stDataFrame"],
         [data-testid="stPlotlyChart"] {
-            background: linear-gradient(180deg, rgba(13, 23, 38, 0.88) 0%, rgba(17, 29, 49, 0.92) 100%);
-            border: 1px solid var(--line-soft);
-            border-radius: 20px;
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 4px;
             overflow: hidden;
-            box-shadow: 0 16px 34px rgba(3, 8, 20, 0.22);
-            padding: 0.25rem;
+            padding: 0.2rem;
         }
 
-        [data-testid="stDataFrame"] * {
-            color: var(--text) !important;
-        }
+        [data-testid="stDataFrame"] * { color: var(--text) !important; }
 
         [data-testid="stAlert"] {
-            background: rgba(17, 29, 49, 0.76);
-            border: 1px solid var(--line-soft);
-            border-radius: 16px;
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 4px;
         }
 
         [data-testid="stMarkdownContainer"] a {
-            color: var(--blue);
+            color: var(--orange);
             text-decoration: none;
         }
-
-        [data-testid="stMarkdownContainer"] a:hover {
-            color: white;
-        }
+        [data-testid="stMarkdownContainer"] a:hover { color: white; }
 
         @media (max-width: 900px) {
-            .page-hero {
-                padding: 1rem 1rem 0.95rem 1rem;
-                border-radius: 22px;
-            }
-
-            h1 {
-                font-size: 1.7rem !important;
-            }
+            .page-hero { padding: 0.85rem 1rem; }
+            h1 { font-size: 1.3rem !important; }
         }
         </style>
         """,
@@ -399,14 +336,14 @@ def page_hero(kicker: str, title: str, subtitle: str) -> None:
 
 def card(title: str, body_html: str) -> str:
     title_html = (
-        f'<p style="font-size:10px;text-transform:uppercase;letter-spacing:1.5px;'
-        f'color:{C["muted"]};margin:0 0 12px 0;font-weight:600;">{title}</p>'
+        f'<p style="font-size:9px;text-transform:uppercase;letter-spacing:2px;'
+        f'color:{C["muted"]};margin:0 0 12px 0;font-weight:700;border-bottom:1px solid {C["border"]};'
+        f'padding-bottom:8px;">{title}</p>'
         if title else ""
     )
     return (
-        f'<div style="background:linear-gradient(180deg, {C["card"]} 0%, {C["panel"]} 100%);'
-        f'border:1px solid {C["border"]};border-radius:18px;padding:18px 20px;'
-        f'box-shadow:0 18px 40px rgba(3,8,20,0.28);">'
+        f'<div style="background:{C["card"]};border:1px solid {C["border"]};'
+        f'border-top:2px solid {C["orange"]};border-radius:4px;padding:16px 18px;">'
         + title_html + body_html + "</div>"
     )
 
@@ -414,9 +351,9 @@ def card(title: str, body_html: str) -> str:
 def table(rows: list) -> str:
     rows_html = "".join(
         f'<tr style="border-bottom:1px solid {C["row"]};">'
-        f'<td style="color:{C["muted"]};padding:8px 4px;font-size:13px;">{row[0]}</td>'
+        f'<td style="color:{C["muted"]};padding:7px 4px;font-size:12px;letter-spacing:0.02em;">{row[0]}</td>'
         f'<td style="text-align:right;color:{row[2] if len(row) > 2 else C["text"]};'
-        f'padding:8px 4px;font-size:13px;font-weight:600;">{row[1]}</td></tr>'
+        f'padding:7px 4px;font-size:12px;font-weight:700;font-family:monospace;">{row[1]}</td></tr>'
         for row in rows
     )
     return f'<table style="width:100%;border-collapse:collapse;">{rows_html}</table>'
