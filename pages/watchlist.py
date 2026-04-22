@@ -20,7 +20,7 @@ with add_col:
         "Ajouter des tickers",
         placeholder="ex: AAPL, MSFT, OR.PA",
     )
-    if st.button("Ajouter à la watchlist", use_container_width=True):
+    if st.button("Ajouter à la watchlist", width='stretch'):
         additions = parse_ticker_list(new_tickers_raw)
         updated = current_watchlist[:]
         for ticker in additions:
@@ -32,7 +32,7 @@ with add_col:
 with remove_col:
     if current_watchlist:
         to_remove = st.multiselect("Retirer", current_watchlist)
-        if st.button("Supprimer la sélection", use_container_width=True):
+        if st.button("Supprimer la sélection", width='stretch'):
             save_watchlist([ticker for ticker in current_watchlist if ticker not in to_remove])
             st.rerun()
 
@@ -58,10 +58,10 @@ else:
         display["Revenue Growth (%)"] = display["Revenue Growth (%)"].map(lambda v: f"{v:.1f}%")
         display["Net Margin (%)"] = display["Net Margin (%)"].map(lambda v: f"{v:.1f}%")
         display["Market Cap ($B)"] = display["Market Cap ($B)"].map(lambda v: f"${v:.1f}B" if pd.notna(v) else "N/A")
-        st.dataframe(display, use_container_width=True, hide_index=True)
+        st.dataframe(display, width='stretch', hide_index=True)
 
         focus = st.selectbox("Analyser un ticker de la watchlist", df_watch["Ticker"].tolist())
-        if st.button("Ouvrir dans Stock Analysis", use_container_width=True):
+        if st.button("Ouvrir dans Stock Analysis", width='stretch'):
             open_stock_page(focus)
 
         perf_series = pd.DataFrame(rows)[["Ticker", "1D Change (%)"]].sort_values("1D Change (%)")
@@ -82,4 +82,4 @@ else:
             xaxis=dict(showgrid=False),
             yaxis=dict(showgrid=False),
         )
-        st.plotly_chart(fig_watch, use_container_width=True, config={"displayModeBar": False})
+        st.plotly_chart(fig_watch, width='stretch', config={"displayModeBar": False})

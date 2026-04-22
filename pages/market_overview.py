@@ -175,7 +175,7 @@ with left:
             }
         )
     if core_rows:
-        st.dataframe(pd.DataFrame(core_rows), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(core_rows), width='stretch', hide_index=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
     st.subheader("3. Breadth & Leadership")
@@ -190,7 +190,7 @@ with left:
     st.markdown(card("Market Internals", table(breadth_rows)), unsafe_allow_html=True)
 
     if breadth and breadth.get("trend_table"):
-        st.dataframe(pd.DataFrame(breadth["trend_table"]), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(breadth["trend_table"]), width='stretch', hide_index=True)
 
 with right:
     st.subheader("Volatilité & Sentiment")
@@ -221,7 +221,7 @@ st.divider()
 st.subheader("5. Rotation Sectorielle")
 if sector_perf:
     fig = sector_bar_chart(sector_perf)
-    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+    st.plotly_chart(fig, width='stretch', config={"displayModeBar": False})
 else:
     st.caption("Données sectorielles non disponibles.")
 
@@ -230,6 +230,6 @@ st.divider()
 st.subheader("6. Courbe des Taux US")
 if yield_data:
     fig2 = yield_curve_chart(yield_data)
-    st.plotly_chart(fig2, use_container_width=True, config={"displayModeBar": False})
+    st.plotly_chart(fig2, width='stretch', config={"displayModeBar": False})
 else:
     st.caption("Courbe des taux non disponible.")

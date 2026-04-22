@@ -41,7 +41,7 @@ with col_input:
         label_visibility="collapsed",
     )
 with col_btn:
-    if st.button("ANALYSER →", use_container_width=True, type="primary"):
+    if st.button("ANALYSER →", width='stretch', type="primary"):
         open_stock_page(quick_ticker or "AAPL")
 
 st.markdown("<div style='margin-bottom:1.5rem;'></div>", unsafe_allow_html=True)
@@ -102,5 +102,5 @@ for i, tool in enumerate(TOOLS):
             """,
             unsafe_allow_html=True,
         )
-        if st.button(f"OUVRIR", key=f"nav_{i}", use_container_width=True):
+        if st.button(f"OUVRIR", key=f"nav_{i}", width='stretch'):
             open_page(tool["page"])

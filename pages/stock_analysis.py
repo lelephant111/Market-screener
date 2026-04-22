@@ -220,7 +220,7 @@ with st.spinner("Calcul des scores..."):
     scores = compute_scores(info, df_score)
 
 fig_sc = scorecard_chart(scores)
-st.plotly_chart(fig_sc, use_container_width=True, config={"displayModeBar": False})
+st.plotly_chart(fig_sc, width='stretch', config={"displayModeBar": False})
 st.divider()
 
 col_a, col_b = st.columns(2)
@@ -264,7 +264,7 @@ roa = info.get("returnOnAssets")
 with col_c:
     st.markdown(card("Profitabilité", ""), unsafe_allow_html=True)
     fig_m = profitability_chart(gm, om, nm, roe, roa)
-    st.plotly_chart(fig_m, use_container_width=True, config={"displayModeBar": False})
+    st.plotly_chart(fig_m, width='stretch', config={"displayModeBar": False})
 
 with col_d:
     rev_g = info.get("revenueGrowth")
@@ -354,7 +354,7 @@ if earnings_h is not None and not earnings_h.empty:
     needed = ["epsActual", "epsEstimate"]
     if all(c in earnings_h.columns for c in needed):
         fig_earn = earnings_chart(earnings_h)
-        st.plotly_chart(fig_earn, use_container_width=True, config={"displayModeBar": False})
+        st.plotly_chart(fig_earn, width='stretch', config={"displayModeBar": False})
     else:
         st.caption("Données earnings insuffisantes pour afficher le graphique.")
 else:
@@ -395,7 +395,7 @@ with col_reco:
             unsafe_allow_html=True,
         )
         fig_reco = analyst_bar_chart(strong_buy, buy_c, hold_c, sell_c, strong_sell)
-        st.plotly_chart(fig_reco, use_container_width=True, config={"displayModeBar": False})
+        st.plotly_chart(fig_reco, width='stretch', config={"displayModeBar": False})
     else:
         st.caption("Données de recommandations non disponibles.")
 
@@ -465,9 +465,9 @@ if insiders_df is not None and not insiders_df.empty:
         show = df_ins[list(display_cols.keys())].rename(columns=display_cols).head(8)
         if "Value" in show.columns:
             show["Value"] = show["Value"].apply(lambda v: fmt_large(v) if isinstance(v, (int, float)) else v)
-        st.dataframe(show, use_container_width=True, hide_index=False)
+        st.dataframe(show, width='stretch', hide_index=False)
     else:
-        st.dataframe(df_ins.head(8), use_container_width=True)
+        st.dataframe(df_ins.head(8), width='stretch')
 else:
     st.caption("Données insiders non disponibles.")
 
@@ -527,6 +527,6 @@ if not history.empty:
 
     st.markdown("<br>", unsafe_allow_html=True)
     fig = technical_chart(df_ta, ticker_input)
-    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+    st.plotly_chart(fig, width='stretch', config={"displayModeBar": False})
 
 st.divider()

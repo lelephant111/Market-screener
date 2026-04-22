@@ -32,7 +32,7 @@ with st.expander("Filtres avancés", expanded=False):
     week52_min     = fc.number_input("Perf 52S min (%)", value=-100.0, step=5.0)
     change_min     = fd.number_input("Variation 1J min (%)", value=-100.0, step=0.5)
 
-run = st.button("LANCER LE SCREENER", type="primary", use_container_width=True)
+run = st.button("LANCER LE SCREENER", type="primary", width='stretch')
 
 if not run and "screener_results" not in st.session_state:
     st.info("Configure les filtres puis clique sur LANCER LE SCREENER.")
@@ -131,7 +131,7 @@ display["P/E Fwd"] = display["P/E Fwd"].apply(lambda v: f"{v:.1f}x" if pd.notna(
 
 st.dataframe(
     display,
-    use_container_width=True,
+    width='stretch',
     hide_index=True,
     height=min(600, 35 * len(display) + 38),
 )
@@ -140,5 +140,5 @@ st.dataframe(
 st.markdown("<div style='margin-top:1rem;'></div>", unsafe_allow_html=True)
 tickers_list = df["Ticker"].tolist()
 selected = st.selectbox("Ouvrir dans Stock Analysis", tickers_list, label_visibility="collapsed")
-if st.button(f"OUVRIR {selected}", use_container_width=True):
+if st.button(f"OUVRIR {selected}", width='stretch'):
     open_stock_page(selected)

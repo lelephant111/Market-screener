@@ -26,7 +26,7 @@ if ticker_a and ticker_b:
         st.error("Impossible de charger l'un des deux historiques.")
     else:
         fig_pair = relative_performance_chart(hist_a, hist_b, ticker_a, ticker_b)
-        st.plotly_chart(fig_pair, use_container_width=True, config={"displayModeBar": False})
+        st.plotly_chart(fig_pair, width='stretch', config={"displayModeBar": False})
 
         merged = pd.concat(
             [hist_a["Close"].rename(ticker_a), hist_b["Close"].rename(ticker_b)],
