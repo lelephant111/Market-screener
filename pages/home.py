@@ -35,7 +35,7 @@ st.markdown(
 col_input, col_btn = st.columns([4, 1])
 with col_input:
     quick_ticker = st.text_input(
-        "",
+        "Ticker",
         placeholder="Entrer un ticker  —  ex: AAPL, MSFT, ASML",
         key="home_quick_ticker",
         label_visibility="collapsed",
