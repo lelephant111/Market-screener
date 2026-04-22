@@ -270,22 +270,52 @@ def search_tickers(query: str) -> list:
 
 @st.cache_data(ttl=60)
 def get_stock_info(ticker: str) -> dict:
+    info = {}
     stock = yf.Ticker(ticker)
-    info = dict(stock.info or {})
+
+    # Source 1 : info complet (fondamentaux + prix)
+    try:
+        fetched = stock.info
+        if fetched and isinstance(fetched, dict) and len(fetched) > 5:
+            info = dict(fetched)
+    except Exception:
+        pass
+
+    # Source 2 : fast_info (endpoint plus léger, moins bloqué)
     if not info.get("currentPrice") and not info.get("regularMarketPrice"):
         try:
-            last = stock.fast_info.last_price
+            fi = stock.fast_info
+            last = fi.last_price
             if last and not pd.isna(last):
                 info["currentPrice"] = float(last)
+                for attr, key in [("market_cap", "marketCap"), ("currency", "currency"),
+                                   ("fifty_two_week_high", "fiftyTwoWeekHigh"),
+                                   ("fifty_two_week_low", "fiftyTwoWeekLow")]:
+                    try:
+                        val = getattr(fi, attr, None)
+                        if val is not None and not (isinstance(val, float) and pd.isna(val)):
+                            info.setdefault(key, val)
+                    except Exception:
+                        pass
         except Exception:
             pass
+
+    # Source 3 : yf.download — endpoint chart API, le plus résistant au rate-limit
     if not info.get("currentPrice") and not info.get("regularMarketPrice"):
         try:
-            hist = stock.history(period="5d")
+            hist = yf.download(ticker, period="5d", progress=False, auto_adjust=True)
             if not hist.empty:
                 info["currentPrice"] = float(hist["Close"].iloc[-1])
+                if len(hist) >= 2:
+                    prev = float(hist["Close"].iloc[-2])
+                    info.setdefault("previousClose", prev)
         except Exception:
             pass
+
+    # Si aucune source n'a fourni un prix, on lève pour ne pas cacher l'échec
+    if not info.get("currentPrice") and not info.get("regularMarketPrice"):
+        raise RuntimeError(f"Aucune donnée de prix disponible pour {ticker}")
+
     return info
 
 
@@ -295,9 +325,15 @@ def get_stock_history(ticker: str, period: str = "1y") -> pd.DataFrame:
     Récupère l'historique OHLCV (Open, High, Low, Close, Volume) d'un stock.
     period : '1mo', '3mo', '6mo', '1y', '2y', '5y'
     """
+    # yf.download() est plus résistant au rate-limit que Ticker.history()
     try:
-        stock = yf.Ticker(ticker)
-        return stock.history(period=period)
+        df = yf.download(ticker, period=period, progress=False, auto_adjust=True)
+        if not df.empty:
+            return df
+    except Exception:
+        pass
+    try:
+        return yf.Ticker(ticker).history(period=period)
     except Exception:
         return pd.DataFrame()
 
