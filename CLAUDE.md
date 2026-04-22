@@ -14,10 +14,16 @@ L'application doit être :
 
 ## État Actuel Du Projet
 
+### Déploiement
+- **Local** : `cd ~/hedge-fund-tool && python3 -m streamlit run app.py`
+- **En ligne** : https://market-screener-9vxvam2yi8w5dgjbpbplt5.streamlit.app
+- **GitHub** : https://github.com/lelephant111/Market-screener
+- Workflow mise à jour : modifier localement → `git add . && git commit -m "..." && git push` → Streamlit Cloud redéploie automatiquement
+
 ### Stack
 - Python 3.9
 - Streamlit
-- yfinance
+- yfinance 1.2.0
 - pandas
 - plotly
 - requests
@@ -262,29 +268,31 @@ Fonctionnalités actuelles :
 
 ---
 
-## Ce Qui A Été Corrigé Récemment
+## Ce Qui A Été Fait Récemment (2026-04-22)
 
-### Architecture / UX
-- passage d'une app monolithique à une vraie app multi-pages
-- sidebar latérale visible
-- page d'accueil simplifiée
-- thème sombre cohérent
-- rendu plus stable entre mode clair et mode sombre macOS
+### Design Bloomberg
+- Thème complet refait : fond noir #060B14, accent orange #FF6600, font monospace
+- Sidebar "MARKET TERMINAL", barre orange sur page active
+- Cards avec bordure top orange, boutons uppercase rectangulaires
+- Suppression des gradients décoratifs → look terminal instit
 
-### Robustesse données
-- normalisation des taux US Yahoo (`^TNX`, `^TYX`, etc.)
-- normalisation des formats `calendar`
-- protections supplémentaires sur earnings / analystes / historique
+### Page Home
+- Refonte complète : header branding, barre ticker large, 5 cards navigation en grille
+- Suppression du doublon "Stock Analysis"
 
-### Graphiques
-- correction de bugs Plotly
-- correction de conflits de layout
-- meilleure gestion des valeurs négatives
-- stabilisation des graphes relatifs et screener
+### Stock Analysis
+- Fix fallback prix yfinance : si `currentPrice` absent → `fast_info.last_price` → historique 2J
 
-### Lancement local
-- suppression du lancement en fond via `nohup`
-- passage à un lancement ponctuel dans Terminal
+### Screener
+- Univers dynamique via `yfinance.EquityQuery` + `screen()` (yfinance 1.2.0)
+- Régions : Europe, Europe ex-UK + 13 pays individuels
+- Filtrage post-API bonds (% dans nom), listings secondaires, market cap < 500M
+- Tri par volume local pour marchés européens (évite les cross-listings US)
+- Filtres avancés : P/E max, market cap min, perf 52S min, variation 1J min
+
+### Infrastructure
+- Projet publié sur GitHub : https://github.com/lelephant111/Market-screener
+- Déployé sur Streamlit Cloud (gratuit, URL publique)
 
 ---
 
