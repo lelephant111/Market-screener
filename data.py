@@ -155,14 +155,24 @@ def search_tickers(query: str) -> list:
 
 @st.cache_data(ttl=300)
 def get_stock_info(ticker: str) -> dict:
-    """
-    Récupère toutes les infos fondamentales d'un stock via yfinance.
-    Retourne un dict avec P/E, marges, croissance, etc.
-    Le cache dure 5 minutes.
-    """
     try:
         stock = yf.Ticker(ticker)
-        return stock.info
+        info = stock.info or {}
+        if not info.get("currentPrice") and not info.get("regularMarketPrice"):
+            try:
+                last = stock.fast_info.last_price
+                if last:
+                    info["currentPrice"] = last
+            except Exception:
+                pass
+        if not info.get("currentPrice") and not info.get("regularMarketPrice"):
+            try:
+                hist = stock.history(period="2d")
+                if not hist.empty:
+                    info["currentPrice"] = float(hist["Close"].iloc[-1])
+            except Exception:
+                pass
+        return info
     except Exception:
         return {}
 
