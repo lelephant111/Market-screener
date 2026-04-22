@@ -145,10 +145,10 @@ def compute_zacks_ratings(info: dict, df_ta=None, earnings_h=None) -> dict:
         g.append(90 if fwd_g > 20 else 75 if fwd_g > 10 else 60 if fwd_g > 5
                  else 50 if fwd_g > 0 else 30)
 
-    # Surprise EPS du dernier trimestre
+    # Surprise EPS du dernier trimestre (surprisePercent est en décimal dans yfinance)
     if earnings_h is not None and not earnings_h.empty:
         try:
-            sp = earnings_h['surprisePercent'].dropna().iloc[-1]
+            sp = earnings_h['surprisePercent'].dropna().iloc[-1] * 100
             g.append(90 if sp > 10 else 80 if sp > 5 else 68 if sp > 2
                      else 55 if sp > 0 else 32 if sp > -3 else 15)
         except Exception:
@@ -183,12 +183,12 @@ def compute_zacks_ratings(info: dict, df_ta=None, earnings_h=None) -> dict:
             m.append(88 if pct > 10 else 72 if pct > 5 else 58 if pct > 0
                      else 40 if pct > -5 else 20)
 
-    # Momentum des surprises EPS (2 derniers trimestres)
+    # Momentum des surprises EPS (2 derniers trimestres — en décimal dans yfinance)
     if earnings_h is not None and not earnings_h.empty:
         try:
             sps = earnings_h['surprisePercent'].dropna().tail(2).tolist()
             if sps:
-                avg = sum(sps) / len(sps)
+                avg = sum(sps) / len(sps) * 100
                 m.append(88 if avg > 5 else 72 if avg > 2 else 55 if avg > 0 else 28)
         except Exception:
             pass

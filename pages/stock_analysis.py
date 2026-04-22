@@ -238,7 +238,7 @@ with col_a:
         ("EV/EBITDA", fmt(eveb, "x"), val_color(eveb, True, (10, 18, 25))),
         ("PEG Ratio", fmt(peg), val_color(peg, True, (1, 1.5, 2))),
         ("P/S Ratio", fmt(ps, "x"), val_color(ps, True, (2, 5, 10))),
-        ("Dividend Yield", f"{div_yield * 100:.2f}%" if div_yield else "N/A", C["muted"]),
+        ("Dividend Yield", f"{div_yield:.2f}%" if div_yield else "N/A", C["muted"]),
     ])), unsafe_allow_html=True)
 
 with col_b:
@@ -248,7 +248,7 @@ with col_b:
         ("Enterprise Value", fmt_large(info.get("enterpriseValue")), C["text"]),
         ("Revenue (TTM)", fmt_large(info.get("totalRevenue")), C["text"]),
         ("EBITDA", fmt_large(info.get("ebitda")), C["text"]),
-        ("Free Cash Flow", fmt_large(info.get("freeCashflow")), C["green"] if (info.get("freeCashflow") or 0) > 0 else C["red"]),
+        ("Free Cash Flow", fmt_large(info.get("freeCashflow")), C["green"] if info.get("freeCashflow") and info.get("freeCashflow") > 0 else C["red"] if info.get("freeCashflow") is not None else C["muted"]),
         ("P/B Ratio", fmt(pb, "x"), val_color(pb, True, (1, 3, 5))),
     ])), unsafe_allow_html=True)
 
@@ -270,11 +270,11 @@ with col_d:
     rev_g = info.get("revenueGrowth")
     earn_g = info.get("earningsGrowth")
     st.markdown(card("Croissance & P&L", table([
-        ("Revenue Growth (YoY)", fmt_pct(rev_g), val_color(rev_g or 0, False, (0, 0.1, 0.2))),
-        ("Earnings Growth (YoY)", fmt_pct(earn_g), val_color(earn_g or 0, False, (0, 0.1, 0.2))),
-        ("Gross Margin", fmt_pct(gm), val_color(gm or 0, False, (0, 0.25, 0.5))),
-        ("Operating Margin", fmt_pct(om), val_color(om or 0, False, (0, 0.1, 0.2))),
-        ("Net Margin", fmt_pct(nm), val_color(nm or 0, False, (0, 0.05, 0.15))),
+        ("Revenue Growth (YoY)", fmt_pct(rev_g), val_color(rev_g, False, (0, 0.1, 0.2))),
+        ("Earnings Growth (YoY)", fmt_pct(earn_g), val_color(earn_g, False, (0, 0.1, 0.2))),
+        ("Gross Margin", fmt_pct(gm), val_color(gm, False, (0, 0.25, 0.5))),
+        ("Operating Margin", fmt_pct(om), val_color(om, False, (0, 0.1, 0.2))),
+        ("Net Margin", fmt_pct(nm), val_color(nm, False, (0, 0.05, 0.15))),
     ])), unsafe_allow_html=True)
 
 st.markdown("<br>", unsafe_allow_html=True)
@@ -287,9 +287,9 @@ with col_e:
     cash = info.get("totalCash")
     debt = info.get("totalDebt")
     st.markdown(card("Santé Financière", table([
-        ("Debt / Equity", fmt(de, "%", decimals=0), val_color(de or 0, True, (30, 80, 150))),
-        ("Current Ratio", fmt(cr), val_color(cr or 0, False, (0, 1, 1.5))),
-        ("Quick Ratio", fmt(qr), val_color(qr or 0, False, (0, 0.8, 1.2))),
+        ("Debt / Equity", fmt(de, "%", decimals=0), val_color(de, True, (30, 80, 150))),
+        ("Current Ratio", fmt(cr), val_color(cr, False, (0, 1, 1.5))),
+        ("Quick Ratio", fmt(qr), val_color(qr, False, (0, 0.8, 1.2))),
         ("Cash & Équivalents", fmt_large(cash), C["green"] if cash else C["muted"]),
         ("Total Debt", fmt_large(debt), C["red"] if debt else C["muted"]),
     ])), unsafe_allow_html=True)
@@ -305,12 +305,12 @@ with col_f:
         pct_52w = (current_price - low_52w) / (high_52w - low_52w) * 100
 
     st.markdown(card("Positionnement", table([
-        ("Short % of Float", f"{short_float * 100:.1f}%" if short_float else "N/A", val_color(short_float or 0, True, (0.05, 0.10, 0.20))),
+        ("Short % of Float", f"{short_float * 100:.1f}%" if short_float else "N/A", val_color(short_float, True, (0.05, 0.10, 0.20))),
         ("Short Ratio", fmt(short_ratio, " days", decimals=1), C["muted"]),
         ("Beta (1Y)", fmt(beta), C["orange"] if beta and beta > 1.5 else C["text"]),
         ("52w High", f"${high_52w:.2f}" if high_52w else "N/A", C["muted"]),
         ("52w Low", f"${low_52w:.2f}" if low_52w else "N/A", C["muted"]),
-        ("Position 52w", f"{pct_52w:.0f}%" if pct_52w else "N/A", val_color(pct_52w or 0, False, (0, 30, 60))),
+        ("Position 52w", f"{pct_52w:.0f}%" if pct_52w else "N/A", val_color(pct_52w, False, (0, 30, 60))),
     ])), unsafe_allow_html=True)
 
 st.markdown("<br>", unsafe_allow_html=True)

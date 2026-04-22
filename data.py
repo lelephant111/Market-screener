@@ -279,6 +279,115 @@ def search_tickers(query: str) -> list:
 # STOCK — DONNÉES INDIVIDUELLES
 # -------------------------------------------------------
 
+def _supplement_fundamentals(stock, info: dict) -> None:
+    """
+    Complète les métriques fondamentales manquantes via les états financiers yfinance.
+    Appelé quand stock.info est incomplet (rate-limit Streamlit Cloud typiquement).
+    """
+    has_fundamentals = any(info.get(k) for k in ("grossMargins", "trailingPE", "totalRevenue"))
+    if has_fundamentals:
+        return
+
+    def _safe_val(df, key):
+        try:
+            if key in df.index:
+                vals = df.loc[key].dropna()
+                return float(vals.iloc[0]) if len(vals) > 0 else None
+        except Exception:
+            pass
+        return None
+
+    # ── Income statement ────────────────────────────────────────────────────
+    try:
+        fin = stock.financials
+        if fin is not None and not fin.empty:
+            rev = _safe_val(fin, "Total Revenue")
+            gp = _safe_val(fin, "Gross Profit")
+            op_inc = _safe_val(fin, "Operating Income")
+            net_inc = _safe_val(fin, "Net Income")
+            ebitda = _safe_val(fin, "EBITDA")
+            eps_d = _safe_val(fin, "Diluted EPS")
+
+            if rev and rev > 0:
+                info.setdefault("totalRevenue", rev)
+                if gp is not None:
+                    info.setdefault("grossMargins", gp / rev)
+                if op_inc is not None:
+                    info.setdefault("operatingMargins", op_inc / rev)
+                if net_inc is not None:
+                    info.setdefault("profitMargins", net_inc / rev)
+            if ebitda is not None:
+                info.setdefault("ebitda", ebitda)
+            if eps_d is not None:
+                info.setdefault("trailingEps", eps_d)
+
+            # Revenue growth YoY
+            if "Total Revenue" in fin.index:
+                revs = fin.loc["Total Revenue"].dropna()
+                if len(revs) >= 2:
+                    r0, r1 = float(revs.iloc[0]), float(revs.iloc[1])
+                    if r1 != 0:
+                        info.setdefault("revenueGrowth", (r0 - r1) / abs(r1))
+
+            # Earnings growth YoY
+            if "Net Income" in fin.index:
+                nics = fin.loc["Net Income"].dropna()
+                if len(nics) >= 2:
+                    n0, n1 = float(nics.iloc[0]), float(nics.iloc[1])
+                    if n1 != 0:
+                        info.setdefault("earningsGrowth", (n0 - n1) / abs(n1))
+
+    except Exception:
+        pass
+
+    # ── Balance sheet ────────────────────────────────────────────────────────
+    try:
+        bs = stock.balance_sheet
+        if bs is not None and not bs.empty:
+            total_debt = _safe_val(bs, "Total Debt")
+            equity = _safe_val(bs, "Stockholders Equity") or _safe_val(bs, "Common Stock Equity")
+            total_assets = _safe_val(bs, "Total Assets")
+            cash = _safe_val(bs, "Cash Cash Equivalents And Short Term Investments")
+            curr_assets = _safe_val(bs, "Current Assets")
+            curr_liab = _safe_val(bs, "Current Liabilities")
+
+            if total_debt is not None:
+                info.setdefault("totalDebt", total_debt)
+            if cash is not None:
+                info.setdefault("totalCash", cash)
+            if equity and equity != 0 and total_debt is not None:
+                info.setdefault("debtToEquity", total_debt / equity * 100)
+            if curr_assets is not None and curr_liab and curr_liab > 0:
+                info.setdefault("currentRatio", curr_assets / curr_liab)
+
+            # ROE et ROA nécessitent le résultat net de l'income statement
+            try:
+                fin = stock.financials
+                if fin is not None and not fin.empty and "Net Income" in fin.index:
+                    nics = fin.loc["Net Income"].dropna()
+                    if len(nics) > 0:
+                        net_inc = float(nics.iloc[0])
+                        if equity and equity > 0:
+                            info.setdefault("returnOnEquity", net_inc / equity)
+                        if total_assets and total_assets > 0:
+                            info.setdefault("returnOnAssets", net_inc / total_assets)
+            except Exception:
+                pass
+
+    except Exception:
+        pass
+
+    # ── Cash flow ────────────────────────────────────────────────────────────
+    try:
+        cf = stock.cashflow
+        if cf is not None and not cf.empty:
+            fcf = _safe_val(cf, "Free Cash Flow")
+            if fcf is not None:
+                info.setdefault("freeCashflow", fcf)
+    except Exception:
+        pass
+
+
 @st.cache_data(ttl=60)
 def get_stock_info(ticker: str) -> dict:
     info = {}
@@ -328,6 +437,9 @@ def get_stock_info(ticker: str) -> dict:
     # Si aucune source n'a fourni un prix, on lève pour ne pas cacher l'échec
     if not info.get("currentPrice") and not info.get("regularMarketPrice"):
         raise RuntimeError(f"Aucune donnée de prix disponible pour {ticker}")
+
+    # Source 4 : états financiers — fallback si stock.info incomplet (rate-limit cloud)
+    _supplement_fundamentals(stock, info)
 
     return info
 
