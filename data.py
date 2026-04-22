@@ -268,28 +268,25 @@ def search_tickers(query: str) -> list:
 # STOCK — DONNÉES INDIVIDUELLES
 # -------------------------------------------------------
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=60)
 def get_stock_info(ticker: str) -> dict:
-    try:
-        stock = yf.Ticker(ticker)
-        info = stock.info or {}
-        if not info.get("currentPrice") and not info.get("regularMarketPrice"):
-            try:
-                last = stock.fast_info.last_price
-                if last:
-                    info["currentPrice"] = last
-            except Exception:
-                pass
-        if not info.get("currentPrice") and not info.get("regularMarketPrice"):
-            try:
-                hist = stock.history(period="2d")
-                if not hist.empty:
-                    info["currentPrice"] = float(hist["Close"].iloc[-1])
-            except Exception:
-                pass
-        return info
-    except Exception:
-        return {}
+    stock = yf.Ticker(ticker)
+    info = dict(stock.info or {})
+    if not info.get("currentPrice") and not info.get("regularMarketPrice"):
+        try:
+            last = stock.fast_info.last_price
+            if last and not pd.isna(last):
+                info["currentPrice"] = float(last)
+        except Exception:
+            pass
+    if not info.get("currentPrice") and not info.get("regularMarketPrice"):
+        try:
+            hist = stock.history(period="5d")
+            if not hist.empty:
+                info["currentPrice"] = float(hist["Close"].iloc[-1])
+        except Exception:
+            pass
+    return info
 
 
 @st.cache_data(ttl=300)

@@ -102,11 +102,20 @@ if not ticker_input:
     st.stop()
 
 with st.spinner(f"Chargement de {ticker_input}..."):
-    info = get_stock_info(ticker_input)
+    try:
+        info = get_stock_info(ticker_input)
+    except Exception:
+        info = {}
 
 current_price = info.get("currentPrice") or info.get("regularMarketPrice")
 if not current_price:
-    st.error("Ticker introuvable. Vérifie le symbole, par exemple `AAPL` ou `MSFT`.")
+    if len(info) < 5:
+        st.error(
+            f"Impossible de récupérer les données pour **{ticker_input}**. "
+            "Yahoo Finance est peut-être temporairement indisponible. Réessaie dans quelques secondes."
+        )
+    else:
+        st.error(f"Prix introuvable pour **{ticker_input}**. Vérifie le symbole (ex: `AAPL`, `MC.PA`).")
     st.stop()
 
 prev_close = info.get("previousClose", current_price)
