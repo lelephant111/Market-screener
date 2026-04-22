@@ -15,6 +15,17 @@ from pathlib import Path
 TREASURY_SYMBOLS = {"^IRX", "^FVX", "^TNX", "^TYX"}
 
 
+def _flatten_download(df: pd.DataFrame) -> pd.DataFrame:
+    """yf.download() retourne un MultiIndex ('Close','NVDA') pour un seul ticker.
+    Cette fonction le réduit à un Index simple ('Close', 'Open', …)."""
+    if df.empty:
+        return df
+    if isinstance(df.columns, pd.MultiIndex):
+        df = df.copy()
+        df.columns = df.columns.get_level_values(0)
+    return df
+
+
 def _normalize_quote_value(symbol: str, value):
     """
     Yahoo renvoie les taux US en dixièmes de pourcent pour certains symboles
@@ -303,7 +314,9 @@ def get_stock_info(ticker: str) -> dict:
     # Source 3 : yf.download — endpoint chart API, le plus résistant au rate-limit
     if not info.get("currentPrice") and not info.get("regularMarketPrice"):
         try:
-            hist = yf.download(ticker, period="5d", progress=False, auto_adjust=True)
+            hist = _flatten_download(
+                yf.download(ticker, period="5d", progress=False, auto_adjust=True)
+            )
             if not hist.empty:
                 info["currentPrice"] = float(hist["Close"].iloc[-1])
                 if len(hist) >= 2:
@@ -327,7 +340,9 @@ def get_stock_history(ticker: str, period: str = "1y") -> pd.DataFrame:
     """
     # yf.download() est plus résistant au rate-limit que Ticker.history()
     try:
-        df = yf.download(ticker, period=period, progress=False, auto_adjust=True)
+        df = _flatten_download(
+            yf.download(ticker, period=period, progress=False, auto_adjust=True)
+        )
         if not df.empty:
             return df
     except Exception:
