@@ -109,6 +109,121 @@ def _compute_bbp_metrics(history: pd.DataFrame) -> dict:
 
 
 # -------------------------------------------------------
+# SCREENER — UNIVERS DYNAMIQUE via yfinance
+# -------------------------------------------------------
+
+_EU_COUNTRIES = ['fr', 'de', 'nl', 'es', 'it', 'be', 'pt', 'fi', 'at', 'ie', 'dk', 'se', 'no', 'ch', 'pl', 'cz', 'hu']
+_EU_EX_UK_COUNTRIES = [c for c in _EU_COUNTRIES if c != 'gb']
+_SECONDARY_SUFFIXES = ('.F', '.VI', '.MU', '.BE', '.HM', '.DU', '.SG', '.HA', '.TI', '.EI', '.XC')
+
+# region value: either a single country code string, or a list for multi-country
+SCREENER_REGIONS = {
+    "── Zones ──":          None,
+    "Europe":               _EU_COUNTRIES,
+    "Europe ex-UK":         _EU_EX_UK_COUNTRIES,
+    "── Pays ──":           None,
+    "États-Unis":           "us",
+    "Royaume-Uni":          "gb",
+    "France":               "fr",
+    "Allemagne":            "de",
+    "Pays-Bas":             "nl",
+    "Suède":                "se",
+    "Suisse":               "ch",
+    "Italie":               "it",
+    "Espagne":              "es",
+    "Norvège":              "no",
+    "Danemark":             "dk",
+    "Japon":                "jp",
+    "Canada":               "ca",
+    "Australie":            "au",
+    "Hong Kong":            "hk",
+    "Corée du Sud":         "kr",
+}
+
+SCREENER_SECTORS = {
+    "Tous secteurs": None,
+    "Technologie": "Technology",
+    "Santé": "Healthcare",
+    "Services Financiers": "Financial Services",
+    "Énergie": "Energy",
+    "Consommation Cyclique": "Consumer Cyclical",
+    "Consommation Défensive": "Consumer Defensive",
+    "Industrie": "Industrials",
+    "Communication": "Communication Services",
+    "Matériaux": "Basic Materials",
+    "Immobilier": "Real Estate",
+    "Services aux collectivités": "Utilities",
+}
+
+SCREENER_SORT_OPTIONS = {
+    "Market Cap": "intradaymarketcap",
+    "Variation 1J (%)": "percentchange",
+    "Performance 52S (%)": "fiftytwowkpercentchange",
+    "Volume local 3M": "avgdailyvol3m",
+}
+
+
+def _clean_screener_quotes(quotes: list, is_european: bool = False) -> list:
+    import re
+    seen = {}
+    for q in quotes:
+        sym = q.get('symbol', '')
+        name = q.get('shortName') or q.get('longName') or ''
+        if '%' in name:
+            continue
+        if is_european and any(sym.endswith(s) for s in _SECONDARY_SUFFIXES):
+            continue
+        if is_european and (q.get('marketCap') or 0) < 500_000_000:
+            continue
+        canon = re.sub(r'\s+', ' ', name.strip().upper())
+        vol = q.get('averageDailyVolume3Month') or 0
+        if canon not in seen or vol > (seen[canon].get('averageDailyVolume3Month') or 0):
+            seen[canon] = q
+    key = 'marketCap' if not is_european else 'marketCap'
+    return sorted(seen.values(), key=lambda x: x.get('marketCap') or 0, reverse=True)
+
+
+@st.cache_data(ttl=300)
+def screen_universe(region, sector, sort_field: str, size: int) -> list:
+    try:
+        from yfinance import EquityQuery, screen as yf_screen
+
+        is_us = region == 'us'
+        is_european = isinstance(region, list) or (isinstance(region, str) and region in _EU_COUNTRIES and region != 'us')
+
+        # Build region filter
+        if isinstance(region, list):
+            region_filter = EquityQuery('is-in', ['region'] + region)
+        else:
+            region_filter = EquityQuery('eq', ['region', region])
+
+        # For European markets, force volume sort and add min market cap
+        if is_european:
+            effective_sort = 'avgdailyvol3m'
+            # Fetch more to cover all countries before cleanup+re-sort by mktcap
+            fetch_size = max(size * 3, 200)
+            filters = [
+                region_filter,
+                EquityQuery('gt', ['intradaymarketcap', 500_000_000]),
+            ]
+        else:
+            effective_sort = sort_field
+            fetch_size = size
+            filters = [region_filter]
+
+        if sector:
+            filters.append(EquityQuery('eq', ['sector', sector]))
+
+        query = EquityQuery('and', filters) if len(filters) > 1 else filters[0]
+        result = yf_screen(query, sortField=effective_sort, sortAsc=False, size=fetch_size)
+        quotes = result.get('quotes', [])
+        cleaned = _clean_screener_quotes(quotes, is_european=is_european)
+        return cleaned[:size]
+    except Exception:
+        return []
+
+
+# -------------------------------------------------------
 # RECHERCHE DE TICKERS
 # -------------------------------------------------------
 
