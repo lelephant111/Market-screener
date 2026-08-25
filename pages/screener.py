@@ -34,14 +34,25 @@ with st.expander("Filtres avancés", expanded=False):
 
 run = st.button("LANCER LE SCREENER", type="primary", width='stretch')
 
+# Clé représentant les paramètres du dernier run — si les filtres changent, on invalide le cache
+current_filter_key = (region_label, sector_label, sort_label, size)
+if not run and st.session_state.get("screener_filter_key") != current_filter_key:
+    st.session_state.pop("screener_results", None)
+    st.session_state.pop("screener_filter_key", None)
+
 if not run and "screener_results" not in st.session_state:
     st.info("Configure les filtres puis clique sur LANCER LE SCREENER.")
     st.stop()
 
 if run:
     with st.spinner(f"Chargement de l'univers — {region_label} · {sector_label}..."):
-        quotes = screen_universe(region_code, sector_code, sort_field, size)
+        try:
+            quotes = screen_universe(region_code, sector_code, sort_field, size)
+        except Exception as e:
+            st.error(f"Erreur lors du chargement de l'univers Yahoo Finance : {e}")
+            st.stop()
     st.session_state["screener_results"] = quotes
+    st.session_state["screener_filter_key"] = current_filter_key
 else:
     quotes = st.session_state.get("screener_results", [])
 
@@ -92,7 +103,7 @@ df = pd.DataFrame(rows)
 # ── Application des filtres avancés ────────────────────────────────
 df = df[
     (df["_mktcap_b"] >= market_cap_min) &
-    (df["_trailing_pe"].fillna(10_000) <= pe_max) &
+    (df["_trailing_pe"].isna() | (df["_trailing_pe"] <= pe_max)) &
     (df["_52s"] >= week52_min) &
     (df["_1d"] >= change_min)
 ]

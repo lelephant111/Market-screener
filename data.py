@@ -196,42 +196,39 @@ def _clean_screener_quotes(quotes: list, is_european: bool = False) -> list:
 
 @st.cache_data(ttl=300)
 def screen_universe(region, sector, sort_field: str, size: int) -> list:
-    try:
-        from yfinance import EquityQuery, screen as yf_screen
+    from yfinance import EquityQuery, screen as yf_screen
 
-        is_us = region == 'us'
-        is_european = isinstance(region, list) or (isinstance(region, str) and region in _EU_COUNTRIES and region != 'us')
+    is_us = region == 'us'
+    is_european = isinstance(region, list) or (isinstance(region, str) and region in _EU_COUNTRIES and region != 'us')
 
-        # Build region filter
-        if isinstance(region, list):
-            region_filter = EquityQuery('is-in', ['region'] + region)
-        else:
-            region_filter = EquityQuery('eq', ['region', region])
+    # Build region filter
+    if isinstance(region, list):
+        region_filter = EquityQuery('is-in', ['region'] + region)
+    else:
+        region_filter = EquityQuery('eq', ['region', region])
 
-        # For European markets, force volume sort and add min market cap
-        if is_european:
-            effective_sort = 'avgdailyvol3m'
-            # Fetch more to cover all countries before cleanup+re-sort by mktcap
-            fetch_size = max(size * 3, 200)
-            filters = [
-                region_filter,
-                EquityQuery('gt', ['intradaymarketcap', 500_000_000]),
-            ]
-        else:
-            effective_sort = sort_field
-            fetch_size = size
-            filters = [region_filter]
+    # For European markets, force volume sort and add min market cap
+    if is_european:
+        effective_sort = 'avgdailyvol3m'
+        # Fetch more to cover all countries before cleanup+re-sort by mktcap
+        fetch_size = max(size * 3, 200)
+        filters = [
+            region_filter,
+            EquityQuery('gt', ['intradaymarketcap', 500_000_000]),
+        ]
+    else:
+        effective_sort = sort_field
+        fetch_size = size
+        filters = [region_filter]
 
-        if sector:
-            filters.append(EquityQuery('eq', ['sector', sector]))
+    if sector:
+        filters.append(EquityQuery('eq', ['sector', sector]))
 
-        query = EquityQuery('and', filters) if len(filters) > 1 else filters[0]
-        result = yf_screen(query, sortField=effective_sort, sortAsc=False, size=fetch_size)
-        quotes = result.get('quotes', [])
-        cleaned = _clean_screener_quotes(quotes, is_european=is_european)
-        return cleaned[:size]
-    except Exception:
-        return []
+    query = EquityQuery('and', filters) if len(filters) > 1 else filters[0]
+    result = yf_screen(query, sortField=effective_sort, sortAsc=False, size=fetch_size)
+    quotes = result.get('quotes', [])
+    cleaned = _clean_screener_quotes(quotes, is_european=is_european)
+    return cleaned[:size]
 
 
 # -------------------------------------------------------
@@ -591,7 +588,7 @@ def get_market_data() -> dict:
             if len(hist) >= 2:
                 prev    = _normalize_quote_value(symbol, hist['Close'].iloc[-2])
                 current = _normalize_quote_value(symbol, hist['Close'].iloc[-1])
-                if prev is None or current is None:
+                if prev is None or current is None or prev == 0:
                     continue
                 change  = ((current - prev) / prev) * 100
                 data[name] = {"value": current, "change": change}
@@ -624,7 +621,10 @@ def get_sector_performance() -> dict:
         try:
             hist = yf.Ticker(symbol).history(period="2d")
             if len(hist) >= 2:
-                change = ((hist['Close'].iloc[-1] - hist['Close'].iloc[-2]) / hist['Close'].iloc[-2]) * 100
+                prev_close = hist['Close'].iloc[-2]
+                if prev_close == 0 or pd.isna(prev_close):
+                    continue
+                change = ((hist['Close'].iloc[-1] - prev_close) / prev_close) * 100
                 perf[name] = round(change, 2)
         except Exception:
             pass
