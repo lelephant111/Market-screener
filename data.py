@@ -1151,7 +1151,22 @@ def suggest_peers(ticker: str, info: dict, n: int = 6) -> list:
         distance = abs(np.log(cap / own_cap)) if own_cap else -cap  # sans cap propre : les plus gros
         scored.append((distance, q["symbol"]))
     scored.sort()
-    return [sym for _, sym in scored[:n]]
+    shortlist = [sym for _, sym in scored[: n * 3]]
+
+    # Les cotations secondaires de sociétés étrangères (ex : L3Harris cotée à Francfort en .DE)
+    # passent les filtres ci-dessus : on vérifie le pays de chaque société dans son profil.
+    zone = set(peer_region_codes(info.get("country")))
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        profiles = list(pool.map(_raw_profile, shortlist))
+    kept = []
+    for sym, prof in zip(shortlist, profiles):
+        country_code = _COUNTRY_CODES.get(prof.get("country") or "")
+        if prof and country_code is not None and (country_code in zone or (country_code == "lu" and "fr" in zone)):
+            kept.append(sym)
+        if len(kept) == n:
+            break
+    return kept
 
 
 PEER_METRICS = {

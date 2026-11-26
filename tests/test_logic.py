@@ -138,8 +138,13 @@ def test_suggestion_de_pairs_filtre_et_classe(monkeypatch):
     ]
     monkeypatch.setattr(data, "_fetch_industry_universe", lambda industry, regions: quotes)
     monkeypatch.setattr(data, "get_fx_to", lambda target, currencies: {"EUR": 1.0, "GBP": 1.19, "SEK": 0.089, "PLN": 0.22})
+    countries = {"RHM.DE": "Germany", "BA.L": "United Kingdom", "SAAB-B.ST": "Sweden", "AIR.PA": "France",
+                 "HRS.DE": "United States"}
+    monkeypatch.setattr(data, "_raw_profile", lambda t: {"country": countries.get(t), "shortName": t})
+    quotes.append({"symbol": "HRS.DE", "shortName": "L3Harris Technologies Inc.    R", "marketCap": 47e9,
+                   "currency": "EUR", "trailingPE": 25})  # société US cotée à Francfort : écartée par le pays
     info = {"industry": "Aerospace & Defense", "country": "France", "currency": "EUR", "marketCap": 48e9, "shortName": "Thales S.A."}
     peers = data.suggest_peers("HO.PA", info, n=3)
     # BAE 65 Md€ et Rheinmetall 36 Md€ sont les plus proches de 48 Md€, puis Saab (30 Md€)
     assert peers == ["RHM.DE", "BA.L", "SAAB-B.ST"]
-    assert not {"BAL.XC", "GCP.F", "RHM.WA", "SPX.DE", "HO.PA"} & set(data.suggest_peers("HO.PA", info, n=10))
+    assert not {"BAL.XC", "GCP.F", "RHM.WA", "SPX.DE", "HO.PA", "HRS.DE"} & set(data.suggest_peers("HO.PA", info, n=10))
