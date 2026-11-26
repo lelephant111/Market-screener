@@ -1149,9 +1149,11 @@ def suggest_peers(ticker: str, info: dict, n: int = 6) -> list:
         if not cap:
             continue
         distance = abs(np.log(cap / own_cap)) if own_cap else -cap  # sans cap propre : les plus gros
-        scored.append((distance, q["symbol"]))
+        volume = q.get("averageDailyVolume3Month") or 0
+        # À taille égale (même société cotée à Paris et à Francfort), la cotation la plus liquide passe devant
+        scored.append((round(distance, 2), -volume, q["symbol"]))
     scored.sort()
-    shortlist = [sym for _, sym in scored[: n * 3]]
+    shortlist = [sym for _, _, sym in scored[: n * 3]]
 
     # Les cotations secondaires de sociétés étrangères (ex : L3Harris cotée à Francfort en .DE)
     # passent les filtres ci-dessus : on vérifie le pays de chaque société dans son profil.
