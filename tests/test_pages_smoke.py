@@ -75,7 +75,10 @@ def make_ticker_class(mode: str):
             if blocked:
                 _blocked()
             return {
-                "longName": f"{self.symbol} Corp", "sector": "Industrials", "industry": "Aerospace",
+                "longName": f"{self.symbol} Corp", "shortName": f"{self.symbol} Corp",
+                "sector": "Industrials", "industry": "Aerospace & Defense", "country": "France",
+                "ebitdaMargins": 0.13, "operatingMargins": 0.10, "enterpriseToRevenue": 2.1, "52WeekChange": 0.05,
+                "totalDebt": 6e9, "totalCash": 4.5e9, "ebitda": 3.4e9,
                 "currency": "EUR" if self.symbol.endswith(".PA") else "USD",
                 "exchange": "PAR", "currentPrice": 233.9, "previousClose": 230.0,
                 "trailingPE": 25.0, "forwardPE": 21.0, "enterpriseToEbitda": 14.0,
@@ -193,13 +196,14 @@ def fake_requests_get(url, params=None, **kwargs):
 @pytest.fixture(params=["ok", "blocked"])
 def yahoo(request):
     mode = request.param
-    import data  # noqa: F401  (chargé ici pour pouvoir neutraliser ses pauses de retry)
+    import data  # chargé ici pour pouvoir neutraliser ses pauses de retry
+    data._PROFILE_CACHE.clear()
     st.cache_data.clear()
     with mock.patch("yfinance.Ticker", make_ticker_class(mode)), \
          mock.patch("yfinance.download", side_effect=fake_download), \
          mock.patch("yfinance.screen", side_effect=make_screen(mode)), \
          mock.patch("requests.get", side_effect=fake_requests_get), \
-         mock.patch("data.time"):
+         mock.patch("data._sleep"):
         yield mode
     st.cache_data.clear()
 
@@ -233,19 +237,38 @@ def test_stock_analysis(yahoo):
     text = all_text(at)
     if yahoo == "ok":
         assert "Net Seller" in text  # 10 000 titres vendus contre 2 000 achetés sur 3 mois
+        # Pairs trouvés automatiquement, tableau avec médiane, ratings relatifs
+        peer_table = next(d.value for d in at.dataframe if "Société" in d.value.columns)
+        assert peer_table["Société"].iloc[-1] == "Médiane des 6 pairs"
+        assert any("comparés à la médiane de 6 pairs" in c.value for c in at.caption)
+        # Ajout manuel d'un pair
+        at.text_input(key="peers::HO.PA::input").input("RHM.DE")
+        at.button(key="peers::HO.PA::add").click().run()
+        assert not at.exception, [e.value for e in at.exception]
+        assert "RHM.DE" in at.session_state["peers::HO.PA"]
     else:
         assert "Pas de données" in text  # rating Value sans aucun multiple : N/A, pas "C Neutral"
+        assert any("seuils absolus" in c.value for c in at.caption)
 
 
 def test_market_overview(yahoo):
     at = run_page("market_overview.py")
     text = all_text(at)
     # Les taux doivent rester en % : un 10 ans autour de 4 %, pas 0,4 %
-    assert "10Y Treasury" in text
-    row = text.split("10Y Treasury")[1][:300]
+    assert "Taux 10Y" in text
+    row = text.split("Taux 10Y")[1][:300]
     assert ">4." in row or ">5." in row, row
-    indices = at.dataframe[0].value
-    assert indices["Index"].iloc[0] == "S&P 500 (SPY)"  # prix d'ETF, clairement étiqueté
+    assert at.dataframe[0].value["Indice"].iloc[0] == "S&P 500"  # vrai indice, plus un ETF
+
+    at.selectbox(key="market_region").set_value("Europe").run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert "Stoxx 600" in at.dataframe[0].value["Indice"].tolist()
+    assert "Vol. réalisée 20j (Stoxx 600)" in all_text(at) or any("Vol. réalisée" in m.label for m in at.metric)
+    assert len(at.get("plotly_chart")) >= 1  # rotation sectorielle européenne
+
+    at.selectbox(key="market_region").set_value("Asie").run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert "Nikkei 225" in at.dataframe[0].value["Indice"].tolist()
 
 
 def test_screener(yahoo):

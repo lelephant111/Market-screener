@@ -15,8 +15,11 @@ from data import (
     get_earnings_history,
     get_insider_transactions,
     get_stock_history,
+    get_peer_table,
     get_stock_info,
+    peer_medians,
     search_tickers,
+    suggest_peers,
 )
 from ui import C, card, page_hero, table, val_color
 from utils import amount_currency, compute_scores, compute_zacks_ratings, fmt, fmt_large, fmt_pct, fmt_price
@@ -159,11 +162,30 @@ with col_price:
 
 st.divider()
 
+# ── Pairs : suggérés une fois par ticker, puis modifiables plus bas dans la page ──
+PEER_KEY = f"peers::{ticker_input}"
+PEER_OPTIONS_KEY = f"{PEER_KEY}::options"
+PEER_INPUT_KEY = f"{PEER_KEY}::input"
+if PEER_KEY not in st.session_state:
+    with st.spinner("Recherche des pairs (même industrie, même zone)..."):
+        suggested = suggest_peers(ticker_input, info)
+    st.session_state[PEER_KEY] = suggested
+    st.session_state[PEER_OPTIONS_KEY] = list(suggested)
+
+peers = list(st.session_state.get(PEER_KEY, []))
+peer_table = pd.DataFrame()
+medians = {}
+if peers:
+    with st.spinner(f"Chargement des {len(peers)} pairs..."):
+        peer_table = get_peer_table(tuple([ticker_input] + peers), currency)
+    medians = peer_medians(peer_table)
+has_peers = any(k in medians for k in ("pe_fwd", "pe_ttm", "ev_ebitda", "ev_sales"))
+
 with st.spinner("Calcul des ratings..."):
     earnings_h_zacks = get_earnings_history(ticker_input)
     hist_z = get_stock_history(ticker_input, "1y")
     df_z = compute_indicators(hist_z) if not hist_z.empty else None
-    zacks = compute_zacks_ratings(info, df_z, earnings_h_zacks)
+    zacks = compute_zacks_ratings(info, df_z, earnings_h_zacks, medians if has_peers else None)
 
 
 def _to_grade_color(score):
@@ -235,13 +257,18 @@ with zcol:
         f"</div>",
         unsafe_allow_html=True,
     )
+    st.caption(
+        f"Value et Growth comparés à la médiane de {medians.get('_count', 0)} pairs (voir plus bas)."
+        if has_peers else
+        "Value et Growth sur des seuils absolus : pairs indisponibles."
+    )
 
 st.divider()
 
 with st.spinner("Calcul des scores..."):
     history_score = get_stock_history(ticker_input, "1y")
     df_score = compute_indicators(history_score) if not history_score.empty else None
-    scores = compute_scores(info, df_score)
+    scores = compute_scores(info, df_score, medians if has_peers else None)
 
 fig_sc = scorecard_chart(scores)
 st.plotly_chart(fig_sc, width='stretch', config={"displayModeBar": False})
@@ -275,6 +302,85 @@ with col_b:
         ("Free Cash Flow", fmt_large(info.get("freeCashflow"), fin_currency), C["green"] if info.get("freeCashflow") and info.get("freeCashflow") > 0 else C["red"] if info.get("freeCashflow") is not None else C["muted"]),
         ("P/B Ratio", fmt(pb, "x"), val_color(pb, True, (1, 3, 5))),
     ])), unsafe_allow_html=True)
+
+st.markdown("<br>", unsafe_allow_html=True)
+
+# ── Comparaison avec les pairs ─────────────────────────────────────────
+st.subheader("Comparaison avec les pairs")
+
+
+def _add_peer():
+    new = str(st.session_state.get(PEER_INPUT_KEY, "")).upper().strip()
+    if new and new != ticker_input.upper():
+        current = list(st.session_state.get(PEER_KEY, []))
+        options = list(st.session_state.get(PEER_OPTIONS_KEY, []))
+        if new not in current:
+            current.append(new)
+        if new not in options:
+            options.append(new)
+        st.session_state[PEER_OPTIONS_KEY] = options
+        st.session_state[PEER_KEY] = current
+    st.session_state[PEER_INPUT_KEY] = ""
+
+
+options = list(dict.fromkeys(st.session_state.get(PEER_OPTIONS_KEY, []) + peers))
+pc1, pc2, pc3 = st.columns([4, 1.4, 0.8])
+pc1.multiselect("Pairs", options, key=PEER_KEY, label_visibility="collapsed", placeholder="Aucun pair sélectionné")
+pc2.text_input("Ajouter un ticker", key=PEER_INPUT_KEY, label_visibility="collapsed", placeholder="Ajouter : ex. RHM.DE")
+pc3.button("AJOUTER", on_click=_add_peer, width="stretch", key=f"{PEER_KEY}::add")
+
+if peer_table.empty:
+    st.caption(
+        "Aucun pair trouvé automatiquement (industrie inconnue ou Yahoo indisponible, notamment en ligne). "
+        "Ajoute des tickers à la main pour comparer."
+    )
+else:
+    def _mult(x):
+        return f"{x:.1f}x" if x is not None and pd.notna(x) else "N/A"
+
+    def _pct(x):
+        return f"{x * 100:.1f}%" if x is not None and pd.notna(x) else "N/A"
+
+    def _row(r, label):
+        return {
+            "Société": label,
+            "Ticker": r.get("ticker", ""),
+            "Market cap": fmt_large(r.get("market_cap"), currency),
+            "P/E fwd": _mult(r.get("pe_fwd")),
+            "P/E TTM": _mult(r.get("pe_ttm")),
+            "EV/EBITDA": _mult(r.get("ev_ebitda")),
+            "EV/Sales": _mult(r.get("ev_sales")),
+            "Croiss. CA": _pct(r.get("rev_growth")),
+            "Croiss. BPA": _pct(r.get("eps_growth")),
+            "Marge EBITDA": _pct(r.get("ebitda_m")),
+            "Marge op.": _pct(r.get("op_m")),
+            "ROE": _pct(r.get("roe")),
+            "DN / EBITDA": _mult(r.get("net_debt_ebitda")),
+            "Perf 1 an": _pct(r.get("perf_1y")),
+        }
+
+    records = peer_table.to_dict("records")
+    subject = records[0]
+    lines = [_row(subject, f"▶ {subject.get('name', ticker_input)}")]
+    for r in records[1:]:
+        lines.append(_row(r, r.get("name", r["ticker"]) if r.get("available") else f"{r['ticker']} (introuvable)"))
+    median_row = _row({k: medians.get(k) for k in medians}, f"Médiane des {medians.get('_count', 0)} pairs")
+    median_row["Ticker"] = ""
+    lines.append(median_row)
+    st.dataframe(pd.DataFrame(lines), width="stretch", hide_index=True)
+
+    gaps = []
+    for key, label in [("pe_fwd", "P/E fwd"), ("ev_ebitda", "EV/EBITDA"), ("ev_sales", "EV/Sales")]:
+        own, med = subject.get(key), medians.get(key)
+        if own is not None and pd.notna(own) and med:
+            gaps.append(f"{label} {own / med - 1:+.0%}")
+    if gaps:
+        st.caption(f"{subject.get('name', ticker_input)} vs médiane des pairs : " + " · ".join(gaps)
+                   + ". Capitalisations converties dans la devise du titre.")
+    st.caption(
+        f"Pairs suggérés automatiquement : même industrie Yahoo ({info.get('industry', 'N/A')}), même zone, "
+        "capitalisation la plus proche. Modifie la liste si besoin."
+    )
 
 st.markdown("<br>", unsafe_allow_html=True)
 

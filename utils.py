@@ -87,6 +87,63 @@ def color_delta(val):
 # ZACKS-STYLE RATINGS — Value / Growth / Momentum / VGM
 # -------------------------------------------------------
 
+# -------------------------------------------------------
+# COMPARAISON AUX PAIRS — scores relatifs à la médiane du secteur
+# -------------------------------------------------------
+# (champ Yahoo, clé de la médiane dans data.peer_medians, libellé)
+VALUE_VS_PEERS = [
+    ("forwardPE", "pe_fwd", "P/E fwd"),
+    ("trailingPE", "pe_ttm", "P/E TTM"),
+    ("enterpriseToEbitda", "ev_ebitda", "EV/EBITDA"),
+    ("enterpriseToRevenue", "ev_sales", "EV/Sales"),
+]
+GROWTH_VS_PEERS = [("revenueGrowth", "rev_growth", "Croiss. CA"), ("earningsGrowth", "eps_growth", "Croiss. BPA")]
+QUALITY_VS_PEERS = [("ebitdaMargins", "ebitda_m", "Marge EBITDA"), ("operatingMargins", "op_m", "Marge op."), ("returnOnEquity", "roe", "ROE")]
+
+
+def premium_score(premium: float) -> int:
+    """Prime de valorisation vs médiane des pairs -> score 0-100 (moins cher = meilleur).
+    Ex : P/E 15x vs 20x pour les pairs = décote de 25 % -> 75."""
+    p = premium
+    return 90 if p < -0.30 else 75 if p < -0.15 else 62 if p < -0.05 else 50 if p <= 0.05 else 38 if p <= 0.15 else 25 if p <= 0.30 else 12
+
+
+def spread_score(diff_pp: float) -> int:
+    """Écart en points de % vs médiane des pairs -> score 0-100 (plus haut = meilleur).
+    Ex : marge EBITDA 18 % vs 12 % pour les pairs = +6 pts -> 75."""
+    d = diff_pp
+    return 90 if d > 10 else 75 if d > 5 else 62 if d > 1 else 50 if d >= -1 else 38 if d >= -5 else 25 if d >= -10 else 12
+
+
+def _valid_multiple(x):
+    return x is not None and not (isinstance(x, float) and x != x) and 0 < x < 200
+
+
+def _valid_ratio(x):
+    return x is not None and not (isinstance(x, float) and x != x)
+
+
+def relative_value(info: dict, medians: dict) -> list:
+    """[(score, détail), ...] pour chaque multiple comparable aux pairs."""
+    out = []
+    for field, key, label in VALUE_VS_PEERS:
+        own, med = info.get(field), (medians or {}).get(key)
+        if _valid_multiple(own) and _valid_multiple(med):
+            prem = own / med - 1
+            out.append((premium_score(prem), f"{label} {own:.1f}x vs {med:.1f}x pairs ({prem:+.0%})"))
+    return out
+
+
+def relative_spread(info: dict, medians: dict, fields) -> list:
+    out = []
+    for field, key, label in fields:
+        own, med = info.get(field), (medians or {}).get(key)
+        if _valid_ratio(own) and _valid_ratio(med):
+            diff = (own - med) * 100
+            out.append((spread_score(diff), f"{label} {own:.0%} vs {med:.0%} pairs ({diff:+.0f} pts)"))
+    return out
+
+
 def _to_grade(score) -> str:
     """
     Convertit un score 0-100 en grade lettre Zacks.
@@ -104,7 +161,7 @@ def _to_grade(score) -> str:
     return 'F'
 
 
-def compute_zacks_ratings(info: dict, df_ta=None, earnings_h=None) -> dict:
+def compute_zacks_ratings(info: dict, df_ta=None, earnings_h=None, peer_medians=None) -> dict:
     """
     Calcule les 4 ratings Zacks-style : Value, Growth, Momentum, VGM.
 
@@ -150,6 +207,11 @@ def compute_zacks_ratings(info: dict, df_ta=None, earnings_h=None) -> dict:
         v.append(90 if ev_eb < 8 else 75 if ev_eb < 12 else 58 if ev_eb < 18
                  else 38 if ev_eb < 25 else 15)
 
+    # Avec des pairs : on remplace les seuils absolus par la prime/décote vs la médiane du secteur
+    rel_v = relative_value(info, peer_medians)
+    if rel_v:
+        v = [score for score, _ in rel_v]
+
     v_score = round(sum(v) / len(v)) if v else None  # None = aucune donnée, pas une note neutre
 
     # ── GROWTH ───────────────────────────────────────────────────────────
@@ -167,6 +229,10 @@ def compute_zacks_ratings(info: dict, df_ta=None, earnings_h=None) -> dict:
         eg = earn_g * 100
         g.append(90 if eg > 30 else 80 if eg > 20 else 65 if eg > 10
                  else 50 if eg > 0 else 28 if eg > -10 else 12)
+
+    rel_g = relative_spread(info, peer_medians, GROWTH_VS_PEERS)
+    if rel_g:  # croissance comparée à celle des pairs plutôt qu'à des seuils absolus
+        g = [score for score, _ in rel_g]
 
     # Forward EPS growth vs TTM EPS — indicateur clé chez Zacks
     t_eps = info.get('trailingEps')
@@ -256,7 +322,7 @@ def _weighted_avg(scores_weights):
     return round(total / weight, 1)
 
 
-def compute_scores(info: dict, df_ta=None) -> dict:
+def compute_scores(info: dict, df_ta=None, peer_medians=None) -> dict:
     """
     Calcule 5 scores sur 10 pour un stock.
 
@@ -299,6 +365,10 @@ def compute_scores(info: dict, df_ta=None) -> dict:
         v.append((s, 1)); dv.append(f"P/S {ps:.1f}x")
 
     scores_out = {}
+    rel_v = relative_value(info, peer_medians)
+    if rel_v:  # valorisation relative aux pairs
+        v = [(score / 10, 1) for score, _ in rel_v]
+        dv = [detail for _, detail in rel_v]
     scores_out['valuation'] = {'score': _weighted_avg(v), 'label': 'Valorisation', 'details': dv}
 
     # ── 2. QUALITÉ ───────────────────────────────────────────────────────────
@@ -329,6 +399,10 @@ def compute_scores(info: dict, df_ta=None) -> dict:
         s = 10 if r > 12 else 8 if r > 7 else 6 if r > 4 else 3
         q.append((s, 1)); dq.append(f"ROA {r:.0f}%")
 
+    rel_q = relative_spread(info, peer_medians, QUALITY_VS_PEERS)
+    if rel_q:  # marges et ROE relatifs aux pairs
+        q = [(score / 10, 1) for score, _ in rel_q]
+        dq = [detail for _, detail in rel_q]
     scores_out['quality'] = {'score': _weighted_avg(q), 'label': 'Qualité', 'details': dq}
 
     # ── 3. CROISSANCE ────────────────────────────────────────────────────────
@@ -347,6 +421,10 @@ def compute_scores(info: dict, df_ta=None) -> dict:
         s = 10 if eg > 30 else 8 if eg > 20 else 6 if eg > 10 else 4 if eg > 0 else 1
         g.append((s, 2)); dg.append(f"EPS growth {eg:+.0f}%")
 
+    rel_g = relative_spread(info, peer_medians, GROWTH_VS_PEERS)
+    if rel_g:  # croissance relative aux pairs
+        g = [(score / 10, 1) for score, _ in rel_g]
+        dg = [detail for _, detail in rel_g]
     scores_out['growth'] = {'score': _weighted_avg(g), 'label': 'Croissance', 'details': dg}
 
     # ── 4. MOMENTUM ──────────────────────────────────────────────────────────

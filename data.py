@@ -17,6 +17,7 @@ import time
 
 import streamlit as st
 import yfinance as yf
+import numpy as np
 import pandas as pd
 import requests
 import json
@@ -54,6 +55,9 @@ def is_yahoo_blocked_error(exc: Exception) -> bool:
     return any(code in text for code in ("401", "403", "unauthorized", "forbidden", "invalid crumb"))
 
 
+_sleep = time.sleep  # remplacé par un no-op dans les tests
+
+
 def _with_retry(func, *args, attempts: int = 2, wait: float = 1.5):
     """Appelle func(*args). En cas de blocage Yahoo, réessaie une fois après une courte pause."""
     for attempt in range(attempts):
@@ -61,7 +65,7 @@ def _with_retry(func, *args, attempts: int = 2, wait: float = 1.5):
             return func(*args)
         except Exception as exc:
             if attempt < attempts - 1 and is_rate_limit_error(exc):
-                time.sleep(wait)
+                _sleep(wait)
                 continue
             raise
 
@@ -699,21 +703,10 @@ def get_calendar(ticker: str) -> dict:
 # MARCHÉ — DONNÉES GLOBALES
 # -------------------------------------------------------
 
-# Tous les symboles du cockpit marché, téléchargés en UNE seule requête groupée
-# (avant : ~40 appels séparés, lents et qui aggravaient le blocage Yahoo).
-SNAPSHOT_ASSETS = {
-    "S&P 500":      {"symbol": "SPY",    "category": "Core Equity"},
-    "Nasdaq 100":   {"symbol": "QQQ",    "category": "Core Equity"},
-    "Dow Jones":    {"symbol": "DIA",    "category": "Core Equity"},
-    "Russell 2000": {"symbol": "IWM",    "category": "Core Equity"},
-    "VIX":          {"symbol": "^VIX",   "category": "Volatility"},
-    "VIX 3M":       {"symbol": "^VIX3M", "category": "Volatility"},
-    "10Y Treasury": {"symbol": "^TNX",   "category": "Rates"},
-    "Gold":         {"symbol": "GLD",    "category": "Cross-Asset"},
-    "US Dollar":    {"symbol": "UUP",    "category": "Cross-Asset"},
-}
-
-SECTOR_ETFS = {
+# Une configuration par zone. Chaque bloc est optionnel : la page masque ce qui n'existe pas.
+# Symboles vérifiés sur Yahoo le 2026-11-26. Yahoo ne fournit ni VSTOXX ni taux du Bund :
+# pour l'Europe et l'Asie, la volatilité affichée est la volatilité réalisée de l'indice principal.
+US_SECTOR_ETFS = {
     "Tech":           "XLK",
     "Finance":        "XLF",
     "Santé":          "XLV",
@@ -727,34 +720,84 @@ SECTOR_ETFS = {
     "Télécom":        "XLC",
 }
 
-TREASURY_CURVE = {
-    "3M":  "^IRX",
-    "5Y":  "^FVX",
-    "10Y": "^TNX",
-    "30Y": "^TYX",
+EU_SECTOR_ETFS = {  # iShares STOXX Europe 600 sectoriels (Xetra, EUR)
+    "Banques":            "EXV1.DE",
+    "Assurance":          "EXH5.DE",
+    "Services financiers": "EXH2.DE",
+    "Pétrole & gaz":      "EXH1.DE",
+    "Utilities":          "EXH9.DE",
+    "Technologie":        "EXV3.DE",
+    "Télécoms":           "EXV2.DE",
+    "Santé":              "EXV4.DE",
+    "Biens industriels":  "EXH4.DE",
+    "Construction":       "EXV8.DE",
+    "Chimie":             "EXV7.DE",
+    "Matières premières": "EXV6.DE",
+    "Automobile":         "EXV5.DE",
+    "Agroalimentaire":    "EXH3.DE",
+    "Biens de conso.":    "EXH7.DE",
+    "Distribution":       "EXH8.DE",
+    "Voyages & loisirs":  "EXV9.DE",
+    "Médias":             "EXH6.DE",
+    "Immobilier":         "EXI5.DE",
 }
 
-BREADTH_UNIVERSE = {
-    "SPY": "S&P 500",
-    "QQQ": "Nasdaq 100",
-    "DIA": "Dow Jones",
-    "IWM": "Russell 2000",
-    **{symbol: name for name, symbol in SECTOR_ETFS.items()},
+MARKET_REGIONS = {
+    "États-Unis": {
+        "indices": {"S&P 500": "^GSPC", "Nasdaq 100": "^NDX", "Dow Jones": "^DJI", "Russell 2000": "^RUT"},
+        "main": "S&P 500",
+        "leadership": [("Nasdaq 100", "S&P 500", "Nasdaq vs S&P (1M)"), ("Russell 2000", "S&P 500", "Small vs large caps (1M)")],
+        "implied_vol": {"VIX": "^VIX", "VIX 3M": "^VIX3M"},
+        "rates": {"3M": "^IRX", "5Y": "^FVX", "10Y": "^TNX", "30Y": "^TYX"},
+        "sectors": US_SECTOR_ETFS,
+        "sectors_label": "ETFs sectoriels S&P 500 (XL*)",
+        "cross": {"Dollar (DXY)": "DX-Y.NYB", "Or": "GC=F", "Brent": "BZ=F"},
+        "headline_cross": None,
+    },
+    "Europe": {
+        "indices": {
+            "Stoxx 600": "^STOXX", "Euro Stoxx 50": "^STOXX50E", "DAX": "^GDAXI", "CAC 40": "^FCHI",
+            "FTSE 100": "^FTSE", "FTSE MIB": "FTSEMIB.MI", "IBEX 35": "^IBEX", "SMI": "^SSMI", "AEX": "^AEX",
+        },
+        "main": "Stoxx 600",
+        "leadership": [("Euro Stoxx 50", "Stoxx 600", "Euro Stoxx 50 vs Stoxx 600 (1M)"), ("DAX", "CAC 40", "DAX vs CAC 40 (1M)")],
+        "implied_vol": {},
+        "rates": {},
+        "sectors": EU_SECTOR_ETFS,
+        "sectors_label": "ETFs sectoriels Stoxx Europe 600",
+        "cross": {"EUR/USD": "EURUSD=X", "EUR/GBP": "EURGBP=X", "Or": "GC=F", "Brent": "BZ=F"},
+        "headline_cross": "EUR/USD",
+    },
+    "Asie": {
+        "indices": {
+            "Nikkei 225": "^N225", "Hang Seng": "^HSI", "Shanghai Composite": "000001.SS", "KOSPI": "^KS11",
+            "Taiwan (TAIEX)": "^TWII", "Nifty 50": "^NSEI", "ASX 200": "^AXJO",
+        },
+        "main": "Nikkei 225",
+        "leadership": [("Hang Seng", "Nikkei 225", "Hang Seng vs Nikkei (1M)"), ("Nifty 50", "Nikkei 225", "Inde vs Japon (1M)")],
+        "implied_vol": {},
+        "rates": {},
+        "sectors": {},
+        "sectors_label": "",
+        "cross": {"USD/JPY": "USDJPY=X", "USD/CNY": "USDCNY=X", "Or": "GC=F", "Brent": "BZ=F"},
+        "headline_cross": "USD/JPY",
+    },
 }
 
-MARKET_SYMBOLS = sorted(
-    {meta["symbol"] for meta in SNAPSHOT_ASSETS.values()}
-    | set(SECTOR_ETFS.values())
-    | set(TREASURY_CURVE.values())
-    | set(BREADTH_UNIVERSE.keys())
-)
+
+def _region_symbols(region: str) -> list:
+    cfg = MARKET_REGIONS[region]
+    symbols = set(cfg["indices"].values()) | set(cfg["implied_vol"].values()) | set(cfg["rates"].values())
+    symbols |= set(cfg["sectors"].values()) | set(cfg["cross"].values())
+    return sorted(symbols)
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def _fetch_market_history() -> dict:
-    """Historique 1 an de tous les symboles marché, en un seul téléchargement groupé."""
+def _fetch_region_history(region: str) -> dict:
+    """Historique 1 an de tous les symboles d'une zone, en un seul téléchargement groupé."""
+    symbols = _region_symbols(region)
     raw = yf.download(
-        tickers=MARKET_SYMBOLS,
+        tickers=symbols,
         period="1y",
         auto_adjust=True,
         progress=False,
@@ -765,7 +808,7 @@ def _fetch_market_history() -> dict:
         raise RuntimeError("Téléchargement marché vide")
 
     frames = {}
-    for symbol in MARKET_SYMBOLS:
+    for symbol in symbols:
         try:
             if isinstance(raw.columns, pd.MultiIndex):
                 if symbol not in raw.columns.get_level_values(0):
@@ -784,10 +827,10 @@ def _fetch_market_history() -> dict:
     return frames
 
 
-def get_market_history() -> dict:
-    """{symbole: DataFrame OHLCV} pour le cockpit marché. Dict vide si Yahoo ne répond pas."""
+def get_market_history(region: str = "États-Unis") -> dict:
+    """{symbole: DataFrame OHLCV} pour une zone. Dict vide si Yahoo ne répond pas."""
     try:
-        return _with_retry(_fetch_market_history)
+        return _with_retry(_fetch_region_history, region)
     except Exception:
         return {}
 
@@ -808,32 +851,106 @@ def _day_change_pct(close: pd.Series):
     return float((last - prev) / prev * 100)
 
 
-def get_sector_performance() -> dict:
-    """
-    Performance du jour pour chaque secteur S&P via les ETFs XL*.
-    Retourne un dict : { "Tech": 1.2, "Finance": -0.3, ... }
-    """
-    frames = get_market_history()
-    perf = {}
-    for name, symbol in SECTOR_ETFS.items():
-        change = _day_change_pct(_close(frames, symbol))
-        if change is not None:
-            perf[name] = round(change, 2)
-    return perf
+def realized_vol(close: pd.Series, window: int = 20):
+    """Volatilité réalisée annualisée en % (écart-type des rendements journaliers x racine de 252)."""
+    returns = np.log(close / close.shift(1)).dropna()
+    if len(returns) < window:
+        return None
+    return float(returns.tail(window).std() * np.sqrt(252) * 100)
 
 
-def get_yield_curve() -> dict:
+def _asset_stats(frames: dict, symbol: str) -> dict:
+    close = _close(frames, symbol)
+    current = _latest_valid(close)
+    if current is None:
+        return {}
+    ma50 = _latest_valid(close.rolling(50).mean())
+    ma200 = _latest_valid(close.rolling(200).mean())
+    hist = frames.get(symbol)
+    bbp = _compute_bbp_metrics(hist) if symbol not in TREASURY_SYMBOLS else {}
+    return {
+        "symbol": symbol,
+        "value": float(current),
+        "change_1d": _day_change_pct(close),
+        "perf_1m": _pct_change_from_lookback(close, 21),
+        "perf_3m": _pct_change_from_lookback(close, 63),
+        "above_ma50": bool(ma50 is not None and current > ma50),
+        "above_ma200": bool(ma200 is not None and current > ma200),
+        "has_ma200": ma200 is not None,
+        **bbp,
+    }
+
+
+def get_region_overview(region: str = "États-Unis") -> dict:
     """
-    Taux des obligations US pour la courbe des taux, en %.
-    Retourne un dict : { "3M": 5.2, "5Y": 4.8, "10Y": 4.5, "30Y": 4.7 }
+    Tout ce qu'affiche Market Overview pour une zone :
+    indices, volatilité, breadth, leadership, taux, intermarket, rotation sectorielle.
     """
-    frames = get_market_history()
-    yields = {}
-    for name, symbol in TREASURY_CURVE.items():
-        last = _latest_valid(_close(frames, symbol))
+    cfg = MARKET_REGIONS[region]
+    frames = get_market_history(region)
+    if not frames:
+        return {}
+
+    indices = {name: _asset_stats(frames, s) for name, s in cfg["indices"].items()}
+    indices = {k: v for k, v in indices.items() if v}
+
+    implied = {name: _asset_stats(frames, s) for name, s in cfg["implied_vol"].items()}
+    implied = {k: v for k, v in implied.items() if v}
+
+    main_close = _close(frames, cfg["indices"][cfg["main"]])
+    realized = realized_vol(main_close)
+
+    sectors = {}
+    for name, s in cfg["sectors"].items():
+        stats = _asset_stats(frames, s)
+        if stats:
+            sectors[name] = stats
+
+    # Breadth : sur les secteurs quand la zone en a, sinon sur les indices
+    universe = sectors or indices
+    breadth = {}
+    if universe:
+        changes = [v["change_1d"] for v in universe.values() if v.get("change_1d") is not None]
+        with_ma200 = [v for v in universe.values() if v.get("has_ma200")]
+        breadth = {
+            "basis": "secteurs" if sectors else "indices",
+            "universe_size": len(universe),
+            "advancers": sum(c > 0 for c in changes),
+            "decliners": sum(c < 0 for c in changes),
+            "pct_above_50": sum(v["above_ma50"] for v in universe.values()) / len(universe) * 100,
+            "pct_above_200": (sum(v["above_ma200"] for v in with_ma200) / len(with_ma200) * 100) if with_ma200 else None,
+        }
+        breadth["advance_decline"] = breadth["advancers"] - breadth["decliners"]
+
+    leadership = []
+    for a, b, label in cfg["leadership"]:
+        pa, pb = indices.get(a, {}).get("perf_1m"), indices.get(b, {}).get("perf_1m")
+        if pa is not None and pb is not None:
+            leadership.append({"label": label, "spread": pa - pb, "leader": a if pa > pb else b})
+
+    rates = {}
+    for name, s in cfg["rates"].items():
+        last = _latest_valid(_close(frames, s))
         if last is not None:
-            yields[name] = float(last)
-    return yields
+            rates[name] = float(last)
+
+    cross = {name: _asset_stats(frames, s) for name, s in cfg["cross"].items()}
+    cross = {k: v for k, v in cross.items() if v}
+
+    return {
+        "region": region,
+        "main": cfg["main"],
+        "indices": indices,
+        "implied_vol": implied,
+        "realized_vol": realized,
+        "sectors": sectors,
+        "sectors_label": cfg["sectors_label"],
+        "breadth": breadth,
+        "leadership": leadership,
+        "rates": rates,
+        "cross": cross,
+        "headline_cross": cfg["headline_cross"],
+    }
 
 
 @st.cache_data(ttl=300)
@@ -894,100 +1011,269 @@ def get_fear_greed_index() -> dict:
     return {}
 
 
-def get_market_snapshot() -> dict:
-    """
-    Vue priorisée du marché avec indices, volatilité et actifs de contexte.
-    Les indices cash sont approchés via ETF liquides pour pouvoir calculer
-    rendement, tendance et BBP de façon homogène.
-    """
-    frames = get_market_history()
-    snapshot = {}
-    for name, meta in SNAPSHOT_ASSETS.items():
-        symbol = meta["symbol"]
-        hist = frames.get(symbol)
-        if hist is None:
-            continue
-        try:
-            close = _close(frames, symbol)
-            current = _latest_valid(close)
-            if current is None:
-                continue
-            ma50 = _latest_valid(close.rolling(50).mean())
-            ma200 = _latest_valid(close.rolling(200).mean())
-            bbp = _compute_bbp_metrics(hist) if symbol not in TREASURY_SYMBOLS else {}
-            change_1d = _day_change_pct(close)
+# -------------------------------------------------------
+# PAIRS — COMPARABLES D'UNE SOCIÉTÉ
+# -------------------------------------------------------
 
-            snapshot[name] = {
-                "symbol": symbol,
-                "category": meta["category"],
-                "value": float(current),
-                "change_1d": change_1d,
-                "perf_1m": _pct_change_from_lookback(close, 21),
-                "perf_3m": _pct_change_from_lookback(close, 63),
-                "ma50_gap_pct": ((current - ma50) / ma50 * 100) if ma50 not in (None, 0) else None,
-                "ma200_gap_pct": ((current - ma200) / ma200 * 100) if ma200 not in (None, 0) else None,
-                "above_ma50": bool(ma50 is not None and current > ma50),
-                "above_ma200": bool(ma200 is not None and current > ma200),
-                **bbp,
-            }
+_COUNTRY_CODES = {
+    "United Kingdom": "gb", "France": "fr", "Germany": "de", "Netherlands": "nl", "Spain": "es",
+    "Italy": "it", "Belgium": "be", "Portugal": "pt", "Finland": "fi", "Austria": "at",
+    "Ireland": "ie", "Denmark": "dk", "Sweden": "se", "Norway": "no", "Switzerland": "ch",
+    "Poland": "pl", "Czech Republic": "cz", "Hungary": "hu", "Luxembourg": "lu", "Jersey": "gb",
+    "United States": "us", "Canada": "ca", "Japan": "jp", "Australia": "au", "Hong Kong": "hk",
+    "South Korea": "kr", "Taiwan": "tw", "India": "in", "China": "cn", "Singapore": "sg",
+}
+
+# Cotations secondaires ou multilatérales à écarter (Francfort, Vienne, Cboe Europe, LSE IOB...)
+_PEER_EXCLUDED_SUFFIXES = _SECONDARY_SUFFIXES + (".IL",)
+_NAME_NOISE = {
+    "PLC", "ORD", "SA", "SE", "AG", "NV", "AB", "ASA", "SER", "B", "A", "INC", "CORP", "CORPORATION",
+    "HOLDINGS", "HOLDING", "GROUP", "CO", "LTD", "OYJ", "AS", "SPA", "THE", "CLASS", "SHS", "REG", "CXGLO",
+}
+
+
+def _canonical_name(name: str) -> str:
+    """'ROLLS-ROYCE HOLDINGS PLC ORD', 'Rolls-Royce Holdings PLC' -> 'ROLLS-ROYCE' (pour dédoublonner)."""
+    import re
+    words = []
+    for raw in str(name).upper().replace(",", " ").split():
+        key = raw.replace(".", "").replace("/", "")
+        if key in _NAME_NOISE or re.fullmatch(r"[\d.]+P", raw):  # formes juridiques, "2.5P" (nominal UK)
+            continue
+        words.append(raw.strip("."))
+    return " ".join(words[:2]) if words else str(name).upper()
+
+
+def peer_region_codes(country) -> list:
+    """Zone dans laquelle chercher les pairs : toute l'Europe pour une société européenne, sinon son pays."""
+    code = _COUNTRY_CODES.get(country or "")
+    if code in _EU_COUNTRIES or code == "lu":
+        return list(_EU_COUNTRIES)
+    return [code or "us"]
+
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def _fetch_industry_universe(industry: str, regions: tuple) -> list:
+    """Sociétés de la même industrie et de la même zone (cache 24 h). Lève une erreur si Yahoo bloque."""
+    from yfinance import EquityQuery, screen as yf_screen
+
+    region_filter = (
+        EquityQuery("is-in", ["region"] + list(regions)) if len(regions) > 1 else EquityQuery("eq", ["region", regions[0]])
+    )
+    query = EquityQuery("and", [
+        region_filter,
+        EquityQuery("eq", ["industry", industry]),
+        EquityQuery("gt", ["intradaymarketcap", 1_000_000_000]),
+    ])
+    result = yf_screen(query, sortField="intradaymarketcap", sortAsc=False, size=250)
+    return (result or {}).get("quotes", [])
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _fetch_fx_to(target: str, currencies: tuple) -> dict:
+    """Taux de change vers la devise cible : {"SEK": 0.089, ...} pour convertir en EUR, par exemple."""
+    rates = {target: 1.0}
+    pairs = {c: f"{c}{target}=X" for c in currencies if c and c != target}
+    if not pairs:
+        return rates
+    raw = yf.download(list(pairs.values()), period="5d", progress=False, group_by="ticker", threads=True)
+    for cur, symbol in pairs.items():
+        try:
+            frame = raw[symbol] if isinstance(raw.columns, pd.MultiIndex) else raw
+            last = _latest_valid(frame["Close"])
+            if last:
+                rates[cur] = float(last)
         except Exception:
             continue
+    return rates
 
-    return snapshot
+
+def get_fx_to(target: str, currencies) -> dict:
+    """Taux de change vers `target`. Les cotations en pence (GBp) sont ramenées en livres en amont."""
+    try:
+        return _with_retry(_fetch_fx_to, target, tuple(sorted(set(currencies))))
+    except Exception:
+        return {target: 1.0}
 
 
-def get_market_breadth() -> dict:
+def _amount_ccy(currency) -> str:
+    return "GBP" if currency in ("GBp", "GBX") else (currency or "USD")
+
+
+def suggest_peers(ticker: str, info: dict, n: int = 6) -> list:
     """
-    Breadth proxy basé sur les grands ETFs indices/secteurs.
-    Permet de lire rapidement si la hausse/baisse est large ou étroite.
+    Pairs suggérés : même industrie Yahoo, même zone, cotation principale, multiples disponibles,
+    puis les n sociétés à la capitalisation la plus proche (en devise commune).
+    Liste vide si l'industrie est inconnue ou si Yahoo bloque (version en ligne).
     """
-    frames = get_market_history()
+    industry = info.get("industry")
+    if not industry:
+        return []
+    try:
+        quotes = _fetch_industry_universe(industry, tuple(peer_region_codes(info.get("country"))))
+    except Exception:
+        return []
 
-    advancers = 0
-    decliners = 0
-    above_50 = 0
-    above_200 = 0
-    rows = []
-
-    for symbol, label in BREADTH_UNIVERSE.items():
-        close = _close(frames, symbol)
-        if close.empty:
+    own_name = _canonical_name(info.get("shortName") or info.get("longName") or ticker)
+    seen = {}
+    for q in quotes:
+        sym = q.get("symbol", "")
+        name = q.get("shortName") or q.get("longName") or sym
+        if sym.upper() == ticker.upper() or any(sym.endswith(s) for s in _PEER_EXCLUDED_SUFFIXES):
             continue
+        if "XGLO" in name.upper() or "%" in name:
+            continue
+        if not (q.get("forwardPE") or q.get("trailingPE")):
+            continue  # cotation secondaire ou société sans multiples : inutile comme pair
+        canon = _canonical_name(name)
+        if canon == own_name:
+            continue
+        vol = q.get("averageDailyVolume3Month") or 0
+        if canon not in seen or vol > (seen[canon].get("averageDailyVolume3Month") or 0):
+            seen[canon] = q
+    candidates = list(seen.values())
+    if not candidates:
+        return []
 
-        current = close.iloc[-1]
-        ma50 = _latest_valid(close.rolling(50).mean())
-        ma200 = _latest_valid(close.rolling(200).mean())
-        day_change = _day_change_pct(close)
+    target = _amount_ccy(info.get("currency"))
+    fx = get_fx_to(target, [_amount_ccy(q.get("currency")) for q in candidates])
+    own_cap = info.get("marketCap")
 
-        if day_change is not None:
-            advancers += int(day_change > 0)
-            decliners += int(day_change < 0)
-        above_50 += int(ma50 is not None and current > ma50)
-        above_200 += int(ma200 is not None and current > ma200)
+    def cap_in_target(q):
+        rate = fx.get(_amount_ccy(q.get("currency")))
+        return (q.get("marketCap") or 0) * rate if rate else None
 
-        rows.append(
-            {
-                "Ticker": symbol,
-                "Name": label,
-                "1D %": round(day_change, 2) if day_change is not None else None,
-                "Above 50D": "Yes" if ma50 is not None and current > ma50 else "No",
-                "Above 200D": "Yes" if ma200 is not None and current > ma200 else "No",
-            }
-        )
+    scored = []
+    for q in candidates:
+        cap = cap_in_target(q)
+        if not cap:
+            continue
+        distance = abs(np.log(cap / own_cap)) if own_cap else -cap  # sans cap propre : les plus gros
+        volume = q.get("averageDailyVolume3Month") or 0
+        # À taille égale (même société cotée à Paris et à Francfort), la cotation la plus liquide passe devant
+        scored.append((round(distance, 2), -volume, q["symbol"]))
+    scored.sort()
+    shortlist = [sym for _, _, sym in scored[: n * 3]]
 
-    total = len(rows)
-    if total == 0:
-        return {}
+    # Les cotations secondaires de sociétés étrangères (ex : L3Harris cotée à Francfort en .DE)
+    # passent les filtres ci-dessus : on vérifie le pays de chaque société dans son profil.
+    zone = set(peer_region_codes(info.get("country")))
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        profiles = list(pool.map(_raw_profile, shortlist))
+    # Une seule ligne par société : les actions ordinaires et préférentielles (VOW.DE / VOW3.DE)
+    # ont des noms courts différents mais le même nom officiel.
+    seen_companies = {_canonical_name(info.get("longName") or info.get("shortName") or ticker)}
+    kept = []
+    for sym, prof in zip(shortlist, profiles):
+        if not prof:
+            continue
+        country_code = _COUNTRY_CODES.get(prof.get("country") or "")
+        if country_code is None or not (country_code in zone or (country_code == "lu" and "fr" in zone)):
+            continue
+        company = _canonical_name(prof.get("longName") or prof.get("shortName") or sym)
+        if company in seen_companies:
+            continue
+        seen_companies.add(company)
+        kept.append(sym)
+        if len(kept) == n:
+            break
+    return kept
 
-    return {
-        "universe_size": total,
-        "advancers": advancers,
-        "decliners": decliners,
-        "advance_decline": advancers - decliners,
-        "pct_above_50": (above_50 / total) * 100,
-        "pct_above_200": (above_200 / total) * 100,
-        "trend_table": rows,
-    }
+
+PEER_METRICS = {
+    # clé interne : (champ Yahoo, libellé, type)
+    "pe_fwd":     ("forwardPE", "P/E fwd", "multiple"),
+    "pe_ttm":     ("trailingPE", "P/E TTM", "multiple"),
+    "ev_ebitda":  ("enterpriseToEbitda", "EV/EBITDA", "multiple"),
+    "ev_sales":   ("enterpriseToRevenue", "EV/Sales", "multiple"),
+    "rev_growth": ("revenueGrowth", "Croiss. CA", "pct"),
+    "eps_growth": ("earningsGrowth", "Croiss. BPA", "pct"),
+    "ebitda_m":   ("ebitdaMargins", "Marge EBITDA", "pct"),
+    "op_m":       ("operatingMargins", "Marge op.", "pct"),
+    "roe":        ("returnOnEquity", "ROE", "pct"),
+    "perf_1y":    ("52WeekChange", "Perf 1 an", "pct"),
+}
+
+
+_PROFILE_CACHE = {}       # {ticker: (horodatage, profil)} : évite de tout recharger quand on retire un pair
+_PROFILE_TTL = 900        # secondes
+
+
+def _raw_profile(ticker: str) -> dict:
+    """Profil Yahoo brut avec petit cache maison (st.cache_data n'est pas fait pour les threads)."""
+    cached = _PROFILE_CACHE.get(ticker)
+    if cached and time.time() - cached[0] < _PROFILE_TTL:
+        return cached[1]
+    try:
+        data = yf.Ticker(ticker).info
+        profile = dict(data) if isinstance(data, dict) and any(data.get(k) for k in _PROFILE_KEYS) else {}
+    except Exception:
+        profile = {}
+    if profile:  # on ne garde jamais un échec en cache
+        _PROFILE_CACHE[ticker] = (time.time(), profile)
+    return profile
+
+
+def _clean_multiple(value):
+    """Un multiple négatif (pertes) ou absurde n'a pas de sens en comparaison : None."""
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return None
+    return float(value) if 0 < value < 200 else None
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def get_peer_table(tickers: tuple, base_currency: str) -> pd.DataFrame:
+    """
+    Une ligne par société (la première est la société analysée) avec capitalisation
+    convertie en `base_currency`, multiples, croissance, marges et levier.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        profiles = list(pool.map(_raw_profile, tickers))
+
+    target = _amount_ccy(base_currency)
+    fx = get_fx_to(target, [_amount_ccy(p.get("currency")) for p in profiles if p])
+
+    rows = []
+    for ticker, p in zip(tickers, profiles):
+        if not p:
+            rows.append({"ticker": ticker, "name": ticker, "available": False})
+            continue
+        rate = fx.get(_amount_ccy(p.get("currency")))
+        cap = p.get("marketCap")
+        row = {
+            "ticker": ticker,
+            "name": p.get("longName") or p.get("shortName") or ticker,  # nom officiel, plus propre que le nom court
+            "country": p.get("country"),
+            "available": True,
+            "market_cap": cap * rate if cap and rate else None,
+        }
+        for key, (field, _, kind) in PEER_METRICS.items():
+            value = p.get(field)
+            row[key] = _clean_multiple(value) if kind == "multiple" else (
+                float(value) if value is not None and not (isinstance(value, float) and pd.isna(value)) else None
+            )
+        debt, cash, ebitda = p.get("totalDebt"), p.get("totalCash"), p.get("ebitda")
+        row["net_debt_ebitda"] = ((debt or 0) - (cash or 0)) / ebitda if ebitda and ebitda > 0 and debt is not None else None
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def peer_medians(table: pd.DataFrame) -> dict:
+    """Médiane de chaque indicateur sur les pairs (hors société analysée, première ligne)."""
+    peers = table.iloc[1:]
+    if "available" in peers:
+        peers = peers[peers["available"]]
+    medians = {}
+    for key in list(PEER_METRICS.keys()) + ["net_debt_ebitda", "market_cap"]:
+        if key in peers:
+            series = pd.to_numeric(peers[key], errors="coerce").dropna()
+            if len(series) >= 2:
+                medians[key] = float(series.median())
+    medians["_count"] = int(len(peers))
+    return medians
 
 
 # -------------------------------------------------------

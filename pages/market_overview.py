@@ -2,13 +2,7 @@ import pandas as pd
 import streamlit as st
 
 from charts import sector_bar_chart, yield_curve_chart
-from data import (
-    get_fear_greed_index,
-    get_market_breadth,
-    get_market_snapshot,
-    get_sector_performance,
-    get_yield_curve,
-)
+from data import MARKET_REGIONS, get_fear_greed_index, get_region_overview
 from ui import C, card, page_hero, table
 from utils import fmt, fmt_pct
 
@@ -27,29 +21,23 @@ def score_to_rating(score):
     return "Extreme Fear"
 
 
-def proxy_fear_greed(snapshot, breadth):
+def proxy_sentiment(vol_value, main, breadth):
+    """Score de sentiment 0-100 maison : volatilité, tendance et momentum de l'indice principal, breadth."""
     parts = []
-
-    vix = snapshot.get("VIX", {})
-    vix_value = vix.get("value")
-    if vix_value is not None:
-        parts.append(85 if vix_value < 15 else 70 if vix_value < 18 else 55 if vix_value < 22 else 35 if vix_value < 28 else 15)
-
-    spy = snapshot.get("S&P 500", {})
-    if spy.get("above_ma200") is not None:
-        parts.append(75 if spy.get("above_ma200") else 25)
-    if spy.get("perf_1m") is not None:
-        parts.append(80 if spy["perf_1m"] > 5 else 65 if spy["perf_1m"] > 1 else 50 if spy["perf_1m"] > -1 else 30 if spy["perf_1m"] > -5 else 15)
-
-    pct_above_200 = breadth.get("pct_above_200")
-    if pct_above_200 is not None:
-        parts.append(85 if pct_above_200 >= 75 else 70 if pct_above_200 >= 60 else 50 if pct_above_200 >= 45 else 30 if pct_above_200 >= 30 else 15)
-
+    if vol_value is not None:
+        parts.append(85 if vol_value < 15 else 70 if vol_value < 18 else 55 if vol_value < 22 else 35 if vol_value < 28 else 15)
+    if main.get("has_ma200"):
+        parts.append(75 if main.get("above_ma200") else 25)
+    if main.get("perf_1m") is not None:
+        p = main["perf_1m"]
+        parts.append(80 if p > 5 else 65 if p > 1 else 50 if p > -1 else 30 if p > -5 else 15)
+    if breadth.get("pct_above_200") is not None:
+        b = breadth["pct_above_200"]
+        parts.append(85 if b >= 75 else 70 if b >= 60 else 50 if b >= 45 else 30 if b >= 30 else 15)
     if not parts:
         return {}
-
     score = round(sum(parts) / len(parts), 1)
-    return {"score": score, "rating": score_to_rating(score), "source": "Proxy"}
+    return {"score": score, "rating": score_to_rating(score), "source": "Proxy maison"}
 
 
 def text_metric(col, label, value, delta=None):
@@ -73,177 +61,169 @@ def trend_label(row):
 def bbp_label(value):
     if value is None:
         return "N/A"
-    if value > 0:
-        return "Bullish"
-    if value < 0:
-        return "Bearish"
-    return "Neutral"
+    return "Bullish" if value > 0 else "Bearish" if value < 0 else "Neutral"
+
+
+def pct(value):
+    return fmt(value, "%", decimals=2) if value is not None else "N/A"
+
+
+def signed_color(value):
+    if value is None:
+        return C["muted"]
+    return C["green"] if value > 0 else C["red"]
 
 
 page_hero(
     "Macro Tape",
     "Market Overview",
-    "Lecture hiérarchisée du marché: régime global, sentiment, volatilité, breadth, leadership et taux."
+    "Lecture hiérarchisée du marché : régime, sentiment, volatilité, breadth, leadership, taux et rotation sectorielle."
 )
 
-with st.spinner("Chargement du cockpit marché..."):
-    snapshot = get_market_snapshot()
-    breadth = get_market_breadth()
-    sector_perf = get_sector_performance()
-    yield_data = get_yield_curve()
-    fear_greed = get_fear_greed_index() or proxy_fear_greed(snapshot, breadth)
+region = st.selectbox("Marché", list(MARKET_REGIONS.keys()), index=0, key="market_region")
 
-if not snapshot and not breadth:
+with st.spinner(f"Chargement du marché : {region}..."):
+    ov = get_region_overview(region)
+
+if not ov:
     st.warning(
         "Yahoo Finance ne répond pas pour le moment (limitation des requêtes depuis le serveur). "
         "Les indicateurs marché sont vides : réessaie dans quelques minutes."
     )
+    st.stop()
 
-spy = snapshot.get("S&P 500", {})
-qqq = snapshot.get("Nasdaq 100", {})
-iwm = snapshot.get("Russell 2000", {})
-vix = snapshot.get("VIX", {})
-vix3m = snapshot.get("VIX 3M", {})
+indices = ov["indices"]
+main_name = ov["main"]
+main = indices.get(main_name, {})
+breadth = ov["breadth"]
+rates = ov["rates"]
+cross = ov["cross"]
 
-qqq_lead = None
-if qqq.get("perf_1m") is not None and spy.get("perf_1m") is not None:
-    qqq_lead = qqq["perf_1m"] - spy["perf_1m"]
+# Volatilité de référence : implicite (VIX) si disponible, sinon réalisée 20 jours de l'indice principal
+if "VIX" in ov["implied_vol"]:
+    vol_label, vol_value = "VIX", ov["implied_vol"]["VIX"]["value"]
+    vol_delta = ov["implied_vol"]["VIX"].get("change_1d")
+else:
+    vol_label, vol_value, vol_delta = f"Vol. réalisée 20j ({main_name})", ov["realized_vol"], None
 
-iwm_lead = None
-if iwm.get("perf_1m") is not None and spy.get("perf_1m") is not None:
-    iwm_lead = iwm["perf_1m"] - spy["perf_1m"]
+sentiment = (get_fear_greed_index() if region == "États-Unis" else {}) or proxy_sentiment(vol_value, main, breadth)
 
-vix_term = None
-if vix.get("value") not in (None, 0) and vix3m.get("value") not in (None, 0):
-    vix_term = vix["value"] / vix3m["value"]
-
-curve_3m_10y = None
-if yield_data.get("3M") is not None and yield_data.get("10Y") is not None:
-    curve_3m_10y = yield_data["10Y"] - yield_data["3M"]
-
-curve_5y_30y = None
-if yield_data.get("5Y") is not None and yield_data.get("30Y") is not None:
-    curve_5y_30y = yield_data["30Y"] - yield_data["5Y"]
-
+# ── 1. Indicateurs critiques ───────────────────────────────────────────
 st.subheader("1. Indicateurs Critiques")
 critical = st.columns(6)
-text_metric(
-    critical[0],
-    "Fear & Greed",
-    f"{fear_greed.get('score', 'N/A')}",
-    delta=fear_greed.get("rating", "N/A"),
-)
-critical[1].metric(
-    "VIX",
-    fmt(vix.get("value")),
-    delta=fmt(vix.get("change_1d"), "%", decimals=2) if vix.get("change_1d") is not None else None,
-    delta_color="inverse",
-)
-text_metric(
-    critical[2],
-    "S&P 500 1M (SPY)",
-    fmt(spy.get("perf_1m"), "%", decimals=2) if spy.get("perf_1m") is not None else "N/A",
-    delta=trend_label(spy) if spy else None,
-)
+text_metric(critical[0], "Sentiment", f"{sentiment.get('score', 'N/A')}", delta=sentiment.get("rating"))
+if vol_delta is not None:
+    critical[1].metric(vol_label, fmt(vol_value), delta=fmt(vol_delta, "%", decimals=2), delta_color="inverse")
+else:
+    text_metric(critical[1], vol_label, fmt(vol_value, "%", decimals=1) if vol_value is not None else "N/A")
+text_metric(critical[2], f"{main_name} 1M", pct(main.get("perf_1m")), delta=trend_label(main) if main else None)
 text_metric(
     critical[3],
-    "% > 200D",
-    fmt_pct(breadth.get("pct_above_200"), already_pct=True) if breadth else "N/A",
+    f"% {breadth.get('basis', '')} > 200D",
+    fmt_pct(breadth.get("pct_above_200"), already_pct=True) if breadth.get("pct_above_200") is not None else "N/A",
     delta=f"{breadth.get('advancers', 0)} up / {breadth.get('decliners', 0)} down" if breadth else None,
 )
+lead = ov["leadership"][0] if ov["leadership"] else None
 text_metric(
     critical[4],
-    "QQQ vs SPY (1M)",
-    fmt(qqq_lead, "%", decimals=2) if qqq_lead is not None else "N/A",
-    delta="Growth leadership" if qqq_lead is not None and qqq_lead > 0 else "Broad market leads" if qqq_lead is not None else None,
+    lead["label"] if lead else "Leadership",
+    pct(lead["spread"]) if lead else "N/A",
+    delta=f"{lead['leader']} mène" if lead else None,
 )
-text_metric(
-    critical[5],
-    "10Y - 3M",
-    fmt(curve_3m_10y, "%", decimals=2) if curve_3m_10y is not None else "N/A",
-    delta="Pente positive" if curve_3m_10y is not None and curve_3m_10y > 0 else "Inversion" if curve_3m_10y is not None else None,
-)
+if rates.get("10Y") is not None and rates.get("3M") is not None:
+    curve = rates["10Y"] - rates["3M"]
+    text_metric(critical[5], "10Y - 3M", pct(curve), delta="Pente positive" if curve > 0 else "Inversion")
+elif ov["headline_cross"] and ov["headline_cross"] in cross:
+    hc = cross[ov["headline_cross"]]
+    text_metric(critical[5], f"{ov['headline_cross']} 1M", pct(hc.get("perf_1m")), delta=fmt(hc["value"], decimals=4))
 
 st.divider()
 
 left, right = st.columns([1.15, 0.85])
 
 with left:
-    st.subheader("2. Indices Directeurs (via ETF)")
-    core_names = ["S&P 500", "Nasdaq 100", "Dow Jones", "Russell 2000"]
-    core_rows = []
-    for name in core_names:
-        row = snapshot.get(name)
-        if not row:
-            continue
-        core_rows.append(
-            {
-                "Index": f"{name} ({row['symbol']})",
-                "Prix ETF": round(row["value"], 2),
-                "1D %": round(row["change_1d"], 2) if row.get("change_1d") is not None else None,
-                "1M %": round(row["perf_1m"], 2) if row.get("perf_1m") is not None else None,
-                "3M %": round(row["perf_3m"], 2) if row.get("perf_3m") is not None else None,
-                "Trend": trend_label(row),
-                "BBP": round(row["bbp"], 2) if row.get("bbp") is not None else None,
-                "BBP Signal": bbp_label(row.get("bbp")),
-            }
-        )
-    if core_rows:
-        st.dataframe(pd.DataFrame(core_rows), width='stretch', hide_index=True)
+    # ── 2. Indices ─────────────────────────────────────────────────────
+    st.subheader("2. Indices")
+    rows = [
+        {
+            "Indice": name,
+            "Niveau": round(row["value"], 2),
+            "1D %": round(row["change_1d"], 2) if row.get("change_1d") is not None else None,
+            "1M %": round(row["perf_1m"], 2) if row.get("perf_1m") is not None else None,
+            "3M %": round(row["perf_3m"], 2) if row.get("perf_3m") is not None else None,
+            "Tendance": trend_label(row),
+            "BBP": bbp_label(row.get("bbp")),
+        }
+        for name, row in indices.items()
+    ]
+    if rows:
+        st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
 
+    # ── 3. Breadth & leadership ────────────────────────────────────────
     st.markdown("<br>", unsafe_allow_html=True)
     st.subheader("3. Breadth & Leadership")
+    basis = breadth.get("basis", "")
     breadth_rows = [
-        ("Breadth > 50D", fmt_pct(breadth.get("pct_above_50"), already_pct=True) if breadth else "N/A", C["green"] if breadth and breadth.get("pct_above_50", 0) >= 60 else C["orange"] if breadth and breadth.get("pct_above_50", 0) >= 40 else C["red"]),
-        ("Breadth > 200D", fmt_pct(breadth.get("pct_above_200"), already_pct=True) if breadth else "N/A", C["green"] if breadth and breadth.get("pct_above_200", 0) >= 60 else C["orange"] if breadth and breadth.get("pct_above_200", 0) >= 40 else C["red"]),
-        ("Advance / Decline", f"{breadth.get('advancers', 0)} / {breadth.get('decliners', 0)}" if breadth else "N/A", C["text"]),
-        ("Net A/D", str(breadth.get("advance_decline")) if breadth else "N/A", C["green"] if breadth and breadth.get("advance_decline", 0) > 0 else C["red"]),
-        ("QQQ vs SPY (1M)", fmt(qqq_lead, "%", decimals=2) if qqq_lead is not None else "N/A", C["green"] if qqq_lead is not None and qqq_lead > 0 else C["red"] if qqq_lead is not None else C["muted"]),
-        ("IWM vs SPY (1M)", fmt(iwm_lead, "%", decimals=2) if iwm_lead is not None else "N/A", C["green"] if iwm_lead is not None and iwm_lead > 0 else C["red"] if iwm_lead is not None else C["muted"]),
+        (f"% {basis} > 50D", fmt_pct(breadth.get("pct_above_50"), already_pct=True) if breadth else "N/A",
+         C["green"] if breadth.get("pct_above_50", 0) >= 60 else C["orange"] if breadth.get("pct_above_50", 0) >= 40 else C["red"]),
+        (f"% {basis} > 200D", fmt_pct(breadth.get("pct_above_200"), already_pct=True) if breadth.get("pct_above_200") is not None else "N/A",
+         C["green"] if (breadth.get("pct_above_200") or 0) >= 60 else C["orange"] if (breadth.get("pct_above_200") or 0) >= 40 else C["red"]),
+        ("Hausse / Baisse (1J)", f"{breadth.get('advancers', 0)} / {breadth.get('decliners', 0)}" if breadth else "N/A", C["text"]),
     ]
+    for item in ov["leadership"]:
+        breadth_rows.append((item["label"], pct(item["spread"]), signed_color(item["spread"])))
     st.markdown(card("Market Internals", table(breadth_rows)), unsafe_allow_html=True)
 
-    if breadth and breadth.get("trend_table"):
-        st.dataframe(pd.DataFrame(breadth["trend_table"]), width='stretch', hide_index=True)
-
 with right:
+    # ── Volatilité & sentiment ─────────────────────────────────────────
     st.subheader("Volatilité & Sentiment")
     sentiment_rows = [
-        ("Fear & Greed", f"{fear_greed.get('score', 'N/A')} / 100", C["green"] if fear_greed.get("score", 50) >= 55 else C["red"] if fear_greed.get("score", 50) <= 45 else C["orange"]),
-        ("Regime", fear_greed.get("rating", "N/A"), C["text"]),
-        ("Source", fear_greed.get("source", "N/A"), C["muted"]),
-        ("VIX", fmt(vix.get("value")), C["red"] if vix.get("value", 0) >= 22 else C["green"]),
-        ("VIX 3M", fmt(vix3m.get("value")), C["muted"]),
-        ("VIX / VIX3M", fmt(vix_term), C["red"] if vix_term is not None and vix_term > 1 else C["green"] if vix_term is not None else C["muted"]),
+        ("Sentiment", f"{sentiment.get('score', 'N/A')} / 100",
+         C["green"] if (sentiment.get("score") or 50) >= 55 else C["red"] if (sentiment.get("score") or 50) <= 45 else C["orange"]),
+        ("Régime", sentiment.get("rating", "N/A"), C["text"]),
+        ("Source", sentiment.get("source", "N/A"), C["muted"]),
     ]
+    for name, stats in ov["implied_vol"].items():
+        sentiment_rows.append((name, fmt(stats["value"]), C["red"] if stats["value"] >= 22 else C["green"]))
+    if "VIX" in ov["implied_vol"] and "VIX 3M" in ov["implied_vol"]:
+        term = ov["implied_vol"]["VIX"]["value"] / ov["implied_vol"]["VIX 3M"]["value"]
+        sentiment_rows.append(("VIX / VIX3M", fmt(term), C["red"] if term > 1 else C["green"]))
+    sentiment_rows.append((f"Vol. réalisée 20j ({main_name})", fmt(ov["realized_vol"], "%", decimals=1) if ov["realized_vol"] is not None else "N/A", C["muted"]))
     st.markdown(card("Priority Signals", table(sentiment_rows)), unsafe_allow_html=True)
 
+    # ── 4. Taux & intermarket ──────────────────────────────────────────
     st.markdown("<br>", unsafe_allow_html=True)
     st.subheader("4. Taux & Intermarket")
-    macro_rows = [
-        ("10Y Treasury", fmt(yield_data.get("10Y"), "%", decimals=2) if yield_data else "N/A", C["text"]),
-        ("3M Treasury", fmt(yield_data.get("3M"), "%", decimals=2) if yield_data else "N/A", C["text"]),
-        ("10Y - 3M", fmt(curve_3m_10y, "%", decimals=2) if curve_3m_10y is not None else "N/A", C["green"] if curve_3m_10y is not None and curve_3m_10y > 0 else C["red"] if curve_3m_10y is not None else C["muted"]),
-        ("30Y - 5Y", fmt(curve_5y_30y, "%", decimals=2) if curve_5y_30y is not None else "N/A", C["green"] if curve_5y_30y is not None and curve_5y_30y > 0 else C["muted"]),
-        ("Gold 1M", fmt(snapshot.get("Gold", {}).get("perf_1m"), "%", decimals=2) if snapshot.get("Gold") else "N/A", C["orange"]),
-        ("US Dollar 1M", fmt(snapshot.get("US Dollar", {}).get("perf_1m"), "%", decimals=2) if snapshot.get("US Dollar") else "N/A", C["blue"]),
-    ]
-    st.markdown(card("Rates / Dollar / Gold", table(macro_rows)), unsafe_allow_html=True)
+    macro_rows = []
+    if rates:
+        for name in ("10Y", "3M"):
+            if name in rates:
+                macro_rows.append((f"Taux {name}", pct(rates[name]), C["text"]))
+        if "10Y" in rates and "3M" in rates:
+            macro_rows.append(("10Y - 3M", pct(rates["10Y"] - rates["3M"]), signed_color(rates["10Y"] - rates["3M"])))
+        if "30Y" in rates and "5Y" in rates:
+            macro_rows.append(("30Y - 5Y", pct(rates["30Y"] - rates["5Y"]), signed_color(rates["30Y"] - rates["5Y"])))
+    for name, stats in cross.items():
+        macro_rows.append((f"{name} ({fmt(stats['value'], decimals=4 if '/' in name else 2)}) 1M", pct(stats.get("perf_1m")), signed_color(stats.get("perf_1m"))))
+    st.markdown(card("Taux / Changes / Matières premières", table(macro_rows)), unsafe_allow_html=True)
+    if not rates:
+        st.caption("Taux souverains non disponibles sur Yahoo pour cette zone.")
 
-st.divider()
+# ── 5. Rotation sectorielle ────────────────────────────────────────────
+if ov["sectors"]:
+    st.divider()
+    st.subheader("5. Rotation Sectorielle")
+    horizon = st.radio("Horizon", ["1J", "1M", "3M"], index=1, horizontal=True, key="sector_horizon")
+    field = {"1J": "change_1d", "1M": "perf_1m", "3M": "perf_3m"}[horizon]
+    perf = {name: round(stats[field], 2) for name, stats in ov["sectors"].items() if stats.get(field) is not None}
+    if perf:
+        st.plotly_chart(sector_bar_chart(perf), width="stretch", config={"displayModeBar": False})
+        st.caption(ov["sectors_label"])
+    else:
+        st.caption("Données sectorielles non disponibles.")
 
-st.subheader("5. Rotation Sectorielle")
-if sector_perf:
-    fig = sector_bar_chart(sector_perf)
-    st.plotly_chart(fig, width='stretch', config={"displayModeBar": False})
-else:
-    st.caption("Données sectorielles non disponibles.")
-
-st.divider()
-
-st.subheader("6. Courbe des Taux US")
-if yield_data:
-    fig2 = yield_curve_chart(yield_data)
-    st.plotly_chart(fig2, width='stretch', config={"displayModeBar": False})
-else:
-    st.caption("Courbe des taux non disponible.")
+# ── 6. Courbe des taux ─────────────────────────────────────────────────
+if len(rates) >= 2:
+    st.divider()
+    st.subheader("6. Courbe des Taux US")
+    st.plotly_chart(yield_curve_chart(rates), width="stretch", config={"displayModeBar": False})

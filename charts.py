@@ -53,7 +53,7 @@ def sector_bar_chart(sector_perf: dict) -> go.Figure:
     ))
     fig.update_layout(
         **BASE_LAYOUT,
-        height=400,
+        height=max(320, 26 * len(df) + 60),  # 11 secteurs US, 19 secteurs européens
         xaxis=dict(showgrid=False, zeroline=True, zerolinecolor=COLORS["grid"]),
         yaxis=dict(showgrid=False),
     )
