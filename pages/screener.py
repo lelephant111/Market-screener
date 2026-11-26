@@ -1,7 +1,7 @@
 import pandas as pd
 import streamlit as st
 
-from data import SCREENER_REGIONS, SCREENER_SECTORS, SCREENER_SORT_OPTIONS, screen_universe
+from data import SCREENER_REGIONS, SCREENER_SECTORS, SCREENER_SORT_OPTIONS, is_rate_limit_error, screen_universe
 from ui import C, open_stock_page, page_hero
 
 page_hero(
@@ -49,7 +49,13 @@ if run:
         try:
             quotes = screen_universe(region_code, sector_code, sort_field, size)
         except Exception as e:
-            st.error(f"Erreur lors du chargement de l'univers Yahoo Finance : {e}")
+            if is_rate_limit_error(e):
+                st.error(
+                    "Yahoo Finance limite temporairement les requêtes depuis le serveur. "
+                    "Réessaie dans 1 à 2 minutes, ou lance l'outil en local."
+                )
+            else:
+                st.error(f"Erreur lors du chargement de l'univers Yahoo Finance : {e}")
             st.stop()
     st.session_state["screener_results"] = quotes
     st.session_state["screener_filter_key"] = current_filter_key

@@ -85,6 +85,12 @@ with st.spinner("Chargement du cockpit marché..."):
     yield_data = get_yield_curve()
     fear_greed = get_fear_greed_index() or proxy_fear_greed(snapshot, breadth)
 
+if not snapshot and not breadth:
+    st.warning(
+        "Yahoo Finance ne répond pas pour le moment (limitation des requêtes depuis le serveur). "
+        "Les indicateurs marché sont vides : réessaie dans quelques minutes."
+    )
+
 spy = snapshot.get("S&P 500", {})
 qqq = snapshot.get("Nasdaq 100", {})
 iwm = snapshot.get("Russell 2000", {})
