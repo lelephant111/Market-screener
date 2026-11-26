@@ -52,6 +52,14 @@ def proxy_fear_greed(snapshot, breadth):
     return {"score": score, "rating": score_to_rating(score), "source": "Proxy"}
 
 
+def text_metric(col, label, value, delta=None):
+    """Indicateur dont le sous-titre est un libellé (ex : "Fear") : pas de flèche ↑/↓ trompeuse."""
+    try:
+        col.metric(label, value, delta=delta, delta_color="off", delta_arrow="off")
+    except TypeError:  # anciennes versions de Streamlit sans delta_arrow
+        col.metric(label, value, delta=delta, delta_color="off")
+
+
 def trend_label(row):
     if row.get("above_ma50") and row.get("above_ma200"):
         return "Strong Uptrend"
@@ -119,11 +127,11 @@ if yield_data.get("5Y") is not None and yield_data.get("30Y") is not None:
 
 st.subheader("1. Indicateurs Critiques")
 critical = st.columns(6)
-critical[0].metric(
+text_metric(
+    critical[0],
     "Fear & Greed",
     f"{fear_greed.get('score', 'N/A')}",
     delta=fear_greed.get("rating", "N/A"),
-    delta_color="off",
 )
 critical[1].metric(
     "VIX",
@@ -131,29 +139,29 @@ critical[1].metric(
     delta=fmt(vix.get("change_1d"), "%", decimals=2) if vix.get("change_1d") is not None else None,
     delta_color="inverse",
 )
-critical[2].metric(
-    "S&P 500 1M",
+text_metric(
+    critical[2],
+    "S&P 500 1M (SPY)",
     fmt(spy.get("perf_1m"), "%", decimals=2) if spy.get("perf_1m") is not None else "N/A",
     delta=trend_label(spy) if spy else None,
-    delta_color="off",
 )
-critical[3].metric(
+text_metric(
+    critical[3],
     "% > 200D",
     fmt_pct(breadth.get("pct_above_200"), already_pct=True) if breadth else "N/A",
     delta=f"{breadth.get('advancers', 0)} up / {breadth.get('decliners', 0)} down" if breadth else None,
-    delta_color="off",
 )
-critical[4].metric(
+text_metric(
+    critical[4],
     "QQQ vs SPY (1M)",
     fmt(qqq_lead, "%", decimals=2) if qqq_lead is not None else "N/A",
     delta="Growth leadership" if qqq_lead is not None and qqq_lead > 0 else "Broad market leads" if qqq_lead is not None else None,
-    delta_color="off",
 )
-critical[5].metric(
+text_metric(
+    critical[5],
     "10Y - 3M",
     fmt(curve_3m_10y, "%", decimals=2) if curve_3m_10y is not None else "N/A",
-    delta="Steepening" if curve_3m_10y is not None and curve_3m_10y > 0 else "Inversion" if curve_3m_10y is not None else None,
-    delta_color="off",
+    delta="Pente positive" if curve_3m_10y is not None and curve_3m_10y > 0 else "Inversion" if curve_3m_10y is not None else None,
 )
 
 st.divider()
@@ -161,7 +169,7 @@ st.divider()
 left, right = st.columns([1.15, 0.85])
 
 with left:
-    st.subheader("2. Indices Directeurs")
+    st.subheader("2. Indices Directeurs (via ETF)")
     core_names = ["S&P 500", "Nasdaq 100", "Dow Jones", "Russell 2000"]
     core_rows = []
     for name in core_names:
@@ -170,8 +178,8 @@ with left:
             continue
         core_rows.append(
             {
-                "Index": name,
-                "Last": round(row["value"], 2),
+                "Index": f"{name} ({row['symbol']})",
+                "Prix ETF": round(row["value"], 2),
                 "1D %": round(row["change_1d"], 2) if row.get("change_1d") is not None else None,
                 "1M %": round(row["perf_1m"], 2) if row.get("perf_1m") is not None else None,
                 "3M %": round(row["perf_3m"], 2) if row.get("perf_3m") is not None else None,

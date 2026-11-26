@@ -4,6 +4,7 @@ import streamlit as st
 
 from data import load_watchlist, save_watchlist
 from ui import C, WATCHLIST_PATH, build_snapshot_row, open_stock_page, page_hero, parse_ticker_list
+from utils import fmt_large, fmt_price
 
 
 page_hero(
@@ -50,14 +51,14 @@ else:
         df_watch = pd.DataFrame(rows).sort_values("1D Change (%)", ascending=False)
         display = df_watch[[
             "Ticker", "Name", "Price", "1D Change (%)", "Forward P/E",
-            "Revenue Growth (%)", "Net Margin (%)", "Market Cap ($B)"
+            "Revenue Growth (%)", "Net Margin (%)", "Market Cap"
         ]].copy()
-        display["Price"] = display["Price"].map(lambda v: f"${v:.2f}")
+        display["Price"] = [fmt_price(p, c) for p, c in zip(df_watch["Price"], df_watch["Currency"])]
         display["1D Change (%)"] = display["1D Change (%)"].map(lambda v: f"{v:+.2f}%")
         display["Forward P/E"] = display["Forward P/E"].map(lambda v: f"{v:.1f}x" if pd.notna(v) else "N/A")
-        display["Revenue Growth (%)"] = display["Revenue Growth (%)"].map(lambda v: f"{v:.1f}%")
-        display["Net Margin (%)"] = display["Net Margin (%)"].map(lambda v: f"{v:.1f}%")
-        display["Market Cap ($B)"] = display["Market Cap ($B)"].map(lambda v: f"${v:.1f}B" if pd.notna(v) else "N/A")
+        display["Revenue Growth (%)"] = display["Revenue Growth (%)"].map(lambda v: f"{v:.1f}%" if pd.notna(v) else "N/A")
+        display["Net Margin (%)"] = display["Net Margin (%)"].map(lambda v: f"{v:.1f}%" if pd.notna(v) else "N/A")
+        display["Market Cap"] = [fmt_large(m, c) for m, c in zip(df_watch["Market Cap"], df_watch["Currency"])]
         st.dataframe(display, width='stretch', hide_index=True)
 
         focus = st.selectbox("Analyser un ticker de la watchlist", df_watch["Ticker"].tolist())

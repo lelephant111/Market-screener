@@ -40,6 +40,14 @@ def is_rate_limit_error(exc: Exception) -> bool:
     return "too many requests" in text or "rate limit" in text or "429" in text
 
 
+def is_yahoo_blocked_error(exc: Exception) -> bool:
+    """Vrai si Yahoo refuse l'accès (rate limit 429 ou session refusée 401/403)."""
+    if is_rate_limit_error(exc):
+        return True
+    text = str(exc).lower()
+    return any(code in text for code in ("401", "403", "unauthorized", "forbidden", "invalid crumb"))
+
+
 def _with_retry(func, *args, attempts: int = 2, wait: float = 1.5):
     """Appelle func(*args). En cas de blocage Yahoo, réessaie une fois après une courte pause."""
     for attempt in range(attempts):
@@ -157,7 +165,7 @@ def _compute_bbp_metrics(history: pd.DataFrame) -> dict:
 # SCREENER — UNIVERS DYNAMIQUE via yfinance
 # -------------------------------------------------------
 
-_EU_COUNTRIES = ['fr', 'de', 'nl', 'es', 'it', 'be', 'pt', 'fi', 'at', 'ie', 'dk', 'se', 'no', 'ch', 'pl', 'cz', 'hu']
+_EU_COUNTRIES = ['gb', 'fr', 'de', 'nl', 'es', 'it', 'be', 'pt', 'fi', 'at', 'ie', 'dk', 'se', 'no', 'ch', 'pl', 'cz', 'hu']
 _EU_EX_UK_COUNTRIES = [c for c in _EU_COUNTRIES if c != 'gb']
 _SECONDARY_SUFFIXES = ('.F', '.VI', '.MU', '.BE', '.HM', '.DU', '.SG', '.HA', '.TI', '.EI', '.XC')
 
@@ -208,7 +216,17 @@ SCREENER_SORT_OPTIONS = {
 }
 
 
-def _clean_screener_quotes(quotes: list, is_european: bool = False) -> list:
+# Champ de tri Yahoo -> champ correspondant dans chaque résultat
+_SORT_FIELD_TO_QUOTE_KEY = {
+    "intradaymarketcap": "marketCap",
+    "percentchange": "regularMarketChangePercent",
+    "fiftytwowkpercentchange": "fiftyTwoWeekChangePercent",
+    "avgdailyvol3m": "averageDailyVolume3Month",
+}
+
+
+def _clean_screener_quotes(quotes: list, is_european: bool = False, sort_field: str = "intradaymarketcap") -> list:
+    """Supprime obligations, listings secondaires et doublons, puis trie selon le choix de l'utilisateur."""
     import re
     seen = {}
     for q in quotes:
@@ -224,15 +242,14 @@ def _clean_screener_quotes(quotes: list, is_european: bool = False) -> list:
         vol = q.get('averageDailyVolume3Month') or 0
         if canon not in seen or vol > (seen[canon].get('averageDailyVolume3Month') or 0):
             seen[canon] = q
-    key = 'marketCap' if not is_european else 'marketCap'
-    return sorted(seen.values(), key=lambda x: x.get('marketCap') or 0, reverse=True)
+    key = _SORT_FIELD_TO_QUOTE_KEY.get(sort_field, "marketCap")
+    return sorted(seen.values(), key=lambda x: x.get(key) or 0, reverse=True)
 
 
 @st.cache_data(ttl=300)
 def screen_universe(region, sector, sort_field: str, size: int) -> list:
     from yfinance import EquityQuery, screen as yf_screen
 
-    is_us = region == 'us'
     is_european = isinstance(region, list) or (isinstance(region, str) and region in _EU_COUNTRIES and region != 'us')
 
     # Build region filter
@@ -266,7 +283,7 @@ def screen_universe(region, sector, sort_field: str, size: int) -> list:
         lambda: yf_screen(query, sortField=effective_sort, sortAsc=False, size=fetch_size)
     )
     quotes = (result or {}).get('quotes', [])
-    cleaned = _clean_screener_quotes(quotes, is_european=is_european)
+    cleaned = _clean_screener_quotes(quotes, is_european=is_european, sort_field=sort_field)
     return cleaned[:size]
 
 
@@ -509,7 +526,7 @@ def get_stock_info(ticker: str) -> dict:
         info = dict(_with_retry(_fetch_full_info, ticker))
     except Exception as exc:
         partial = True
-        rate_limited = is_rate_limit_error(exc)
+        rate_limited = is_yahoo_blocked_error(exc)
 
     if not info.get("currentPrice"):
         info["currentPrice"] = info.get("regularMarketPrice")

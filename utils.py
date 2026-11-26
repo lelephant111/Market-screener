@@ -23,27 +23,57 @@ def fmt_pct(val, already_pct=False):
     return f"{val * 100:.1f}%"
 
 
-def fmt_large(val):
-    """
-    Formate les grands nombres financiers avec suffixe lisible.
-    Exemples : 2 500 000 000 → '$2.50B', 1 200 000 → '$1.20M'
-    """
-    if val is None or (isinstance(val, float) and val != val):
-        return "N/A"
-    if val >= 1e12:
-        return f"${val / 1e12:.2f}T"
-    if val >= 1e9:
-        return f"${val / 1e9:.2f}B"
-    if val >= 1e6:
-        return f"${val / 1e6:.2f}M"
-    return f"${val:,.0f}"
+# Symbole affiché pour chaque devise Yahoo.
+# "GBp" = pence sterling : cours des actions de Londres (1 £ = 100 p).
+CURRENCY_SYMBOLS = {
+    "USD": "$", "EUR": "€", "GBP": "£", "GBp": "p", "GBX": "p", "CHF": "CHF ",
+    "JPY": "¥", "CAD": "C$", "AUD": "A$", "HKD": "HK$", "KRW": "₩",
+    "SEK": "SEK ", "NOK": "NOK ", "DKK": "DKK ", "PLN": "PLN ", "CZK": "CZK ", "HUF": "HUF ",
+}
 
 
-def fmt_price(val):
-    """Formate un prix avec 2 décimales et signe $."""
-    if val is None or (isinstance(val, float) and val != val):
+def currency_symbol(code) -> str:
+    """'EUR' → '€'. Devise inconnue → son code suivi d'un espace. Absente → '$' (défaut historique)."""
+    if not code:
+        return "$"
+    return CURRENCY_SYMBOLS.get(str(code), f"{code} ")
+
+
+def amount_currency(price_currency) -> str:
+    """Devise des montants (market cap, CA...) : en livres même quand le cours est coté en pence."""
+    return "GBP" if price_currency in ("GBp", "GBX") else (price_currency or "USD")
+
+
+def _is_missing(val) -> bool:
+    return val is None or (isinstance(val, float) and val != val)
+
+
+def fmt_large(val, currency="USD"):
+    """
+    Formate les grands nombres financiers avec suffixe lisible et devise.
+    Exemples : 2 500 000 000 → '$2.50B', -1 200 000 en EUR → '-€1.20M'
+    """
+    if _is_missing(val):
         return "N/A"
-    return f"${val:.2f}"
+    symbol = currency_symbol(amount_currency(currency))
+    sign = "-" if val < 0 else ""
+    a = abs(val)
+    if a >= 1e12:
+        return f"{sign}{symbol}{a / 1e12:.2f}T"
+    if a >= 1e9:
+        return f"{sign}{symbol}{a / 1e9:.2f}B"
+    if a >= 1e6:
+        return f"{sign}{symbol}{a / 1e6:.2f}M"
+    return f"{sign}{symbol}{a:,.0f}"
+
+
+def fmt_price(val, currency="USD"):
+    """Formate un prix avec 2 décimales et la bonne devise ('€233.90', '1234.50p')."""
+    if _is_missing(val):
+        return "N/A"
+    if currency in ("GBp", "GBX"):
+        return f"{val:,.2f}p"
+    return f"{currency_symbol(currency)}{val:,.2f}"
 
 
 def color_delta(val):
@@ -57,7 +87,7 @@ def color_delta(val):
 # ZACKS-STYLE RATINGS — Value / Growth / Momentum / VGM
 # -------------------------------------------------------
 
-def _to_grade(score: float) -> str:
+def _to_grade(score) -> str:
     """
     Convertit un score 0-100 en grade lettre Zacks.
     A = top 20%  (80-100)
@@ -66,6 +96,7 @@ def _to_grade(score: float) -> str:
     D = next 20% (20-39)
     F = bottom   (0-19)
     """
+    if score is None: return 'N/A'
     if score >= 80: return 'A'
     if score >= 60: return 'B'
     if score >= 40: return 'C'
@@ -119,7 +150,7 @@ def compute_zacks_ratings(info: dict, df_ta=None, earnings_h=None) -> dict:
         v.append(90 if ev_eb < 8 else 75 if ev_eb < 12 else 58 if ev_eb < 18
                  else 38 if ev_eb < 25 else 15)
 
-    v_score = round(sum(v) / len(v)) if v else 50
+    v_score = round(sum(v) / len(v)) if v else None  # None = aucune donnée, pas une note neutre
 
     # ── GROWTH ───────────────────────────────────────────────────────────
     # Zacks Growth : croissance passée + forward EPS growth + surprise récente.
@@ -154,7 +185,7 @@ def compute_zacks_ratings(info: dict, df_ta=None, earnings_h=None) -> dict:
         except Exception:
             pass
 
-    g_score = round(sum(g) / len(g)) if g else 50
+    g_score = round(sum(g) / len(g)) if g else None
 
     # ── MOMENTUM ─────────────────────────────────────────────────────────
     # Zacks Momentum : retour prix court terme + révisions d'estimations.
@@ -193,11 +224,12 @@ def compute_zacks_ratings(info: dict, df_ta=None, earnings_h=None) -> dict:
         except Exception:
             pass
 
-    m_score = round(sum(m) / len(m)) if m else 50
+    m_score = round(sum(m) / len(m)) if m else None
 
     # ── VGM ──────────────────────────────────────────────────────────────
-    # Zacks VGM = moyenne pondérée Value + Growth + Momentum
-    vgm_score = round((v_score + g_score + m_score) / 3)
+    # Zacks VGM = moyenne de Value + Growth + Momentum (sur les notes disponibles)
+    available = [x for x in (v_score, g_score, m_score) if x is not None]
+    vgm_score = round(sum(available) / len(available)) if available else None
 
     return {
         'value':    {'grade': _to_grade(v_score),   'score': v_score},

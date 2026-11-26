@@ -1,8 +1,9 @@
 import pandas as pd
 import streamlit as st
 
-from data import SCREENER_REGIONS, SCREENER_SECTORS, SCREENER_SORT_OPTIONS, is_rate_limit_error, screen_universe
-from ui import C, open_stock_page, page_hero
+from data import SCREENER_REGIONS, SCREENER_SECTORS, SCREENER_SORT_OPTIONS, is_yahoo_blocked_error, screen_universe
+from ui import open_stock_page, page_hero
+from utils import fmt_large
 
 page_hero(
     "Idea Flow",
@@ -28,7 +29,7 @@ sort_field   = SCREENER_SORT_OPTIONS[sort_label]
 with st.expander("Filtres avancés", expanded=False):
     fa, fb, fc, fd = st.columns(4)
     pe_max         = fa.number_input("P/E Trailing max", min_value=0.0, value=100.0, step=5.0)
-    market_cap_min = fb.number_input("Market Cap min ($B)", min_value=0.0, value=0.0, step=1.0)
+    market_cap_min = fb.number_input("Market Cap min (Md, devise locale)", min_value=0.0, value=0.0, step=1.0)
     week52_min     = fc.number_input("Perf 52S min (%)", value=-100.0, step=5.0)
     change_min     = fd.number_input("Variation 1J min (%)", value=-100.0, step=0.5)
 
@@ -49,10 +50,10 @@ if run:
         try:
             quotes = screen_universe(region_code, sector_code, sort_field, size)
         except Exception as e:
-            if is_rate_limit_error(e):
+            if is_yahoo_blocked_error(e):
                 st.error(
-                    "Yahoo Finance limite temporairement les requêtes depuis le serveur. "
-                    "Réessaie dans 1 à 2 minutes, ou lance l'outil en local."
+                    "Yahoo Finance refuse les requêtes du screener depuis le serveur en ligne. "
+                    "Réessaie plus tard, ou lance l'outil en local sur ton ordinateur."
                 )
             else:
                 st.error(f"Erreur lors du chargement de l'univers Yahoo Finance : {e}")
@@ -67,15 +68,6 @@ if not quotes:
     st.stop()
 
 # ── Construction du DataFrame ───────────────────────────────────────
-def fmt_cap(val):
-    if not val:
-        return "N/A"
-    if val >= 1e12:
-        return f"${val/1e12:.1f}T"
-    if val >= 1e9:
-        return f"${val/1e9:.1f}B"
-    return f"${val/1e6:.0f}M"
-
 rows = []
 for q in quotes:
     price     = q.get("regularMarketPrice")
@@ -92,7 +84,7 @@ for q in quotes:
         "Société":      q.get("shortName") or q.get("longName", ""),
         "Prix":         f"{price:.2f} {currency}" if price else "N/A",
         "1J%":          chg_pct,
-        "Market Cap":   fmt_cap(mktcap),
+        "Market Cap":   fmt_large(mktcap, currency) if mktcap else "N/A",
         "P/E TTM":      round(trailing_pe, 1) if trailing_pe else None,
         "P/E Fwd":      round(forward_pe, 1) if forward_pe else None,
         "52S%":         round(wk52_chg * 100, 1) if wk52_chg else None,
