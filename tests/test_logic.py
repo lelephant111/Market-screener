@@ -85,3 +85,61 @@ def test_rsi_methode_de_wilder():
 def test_rsi_que_des_hausses_vaut_100():
     close = pd.Series(range(1, 40), dtype=float)
     assert compute_indicators(pd.DataFrame({"Close": close}))["RSI"].iloc[-1] == 100
+
+
+# ── Lot 4 : pairs et ratings relatifs ───────────────────────────────────
+
+def test_scores_relatifs_aux_pairs():
+    from utils import premium_score, relative_spread, relative_value, spread_score, GROWTH_VS_PEERS
+    assert premium_score(-0.25) == 75      # P/E 15x vs 20x : décote de 25 %
+    assert premium_score(0.0) == 50
+    assert premium_score(0.40) == 12
+    assert spread_score(6) == 75           # marge 18 % vs 12 % : +6 pts
+    assert spread_score(-12) == 12
+    info = {"forwardPE": 15.0, "enterpriseToEbitda": 10.0, "revenueGrowth": 0.12}
+    medians = {"pe_fwd": 20.0, "ev_ebitda": 10.0, "rev_growth": 0.06}
+    assert [s for s, _ in relative_value(info, medians)] == [75, 50]
+    assert relative_spread(info, medians, GROWTH_VS_PEERS)[0][0] == 75
+
+
+def test_ratings_utilisent_les_pairs():
+    info = {"forwardPE": 30.0, "trailingPE": 35.0}
+    absolu = compute_zacks_ratings(info)["value"]["score"]
+    vs_pairs = compute_zacks_ratings(info, peer_medians={"pe_fwd": 45.0, "pe_ttm": 50.0})["value"]["score"]
+    assert absolu < 40 < vs_pairs  # 30x paraît cher dans l'absolu, mais c'est une décote de 33 % vs les pairs
+
+
+def test_noms_canoniques_pour_dedoublonner():
+    from data import _canonical_name
+    assert _canonical_name("ROLLS-ROYCE HOLDINGS PLC ORD") == _canonical_name("Rolls-Royce Holdings PLC")
+    assert _canonical_name("BAE SYSTEMS PLC ORD 2.5P") == "BAE SYSTEMS"
+    assert _canonical_name("Thales S.A.") == _canonical_name("THALES")
+
+
+def test_zone_de_recherche_des_pairs():
+    from data import peer_region_codes
+    assert "gb" in peer_region_codes("France") and "de" in peer_region_codes("France")
+    assert peer_region_codes("United States") == ["us"]
+    assert peer_region_codes("Japan") == ["jp"]
+
+
+def test_suggestion_de_pairs_filtre_et_classe(monkeypatch):
+    import data
+    quotes = [
+        {"symbol": "RHM.DE", "shortName": "Rheinmetall AG", "marketCap": 36e9, "currency": "EUR", "forwardPE": 30},
+        {"symbol": "BA.L", "shortName": "BAE SYSTEMS PLC ORD 2.5P", "marketCap": 55e9, "currency": "GBp", "forwardPE": 20},
+        {"symbol": "BAL.XC", "shortName": "BAE Systems PLC", "marketCap": 55e9, "currency": "GBp"},   # Cboe : écarté
+        {"symbol": "GCP.F", "shortName": "GE Aerospace", "marketCap": 300e9, "currency": "EUR"},       # Francfort : écarté
+        {"symbol": "RHM.WA", "shortName": "RHM C.XGLO PLN", "marketCap": 162e9, "currency": "PLN", "forwardPE": 30},
+        {"symbol": "SAAB-B.ST", "shortName": "SAAB AB ser. B", "marketCap": 338e9, "currency": "SEK", "forwardPE": 60},
+        {"symbol": "SPX.DE", "shortName": "Space Exploration Techs", "marketCap": 1600e9, "currency": "EUR"},  # sans P/E
+        {"symbol": "HO.PA", "shortName": "THALES", "marketCap": 48e9, "currency": "EUR", "forwardPE": 21},     # lui-même
+        {"symbol": "AIR.PA", "shortName": "AIRBUS", "marketCap": 160e9, "currency": "EUR", "forwardPE": 25},
+    ]
+    monkeypatch.setattr(data, "_fetch_industry_universe", lambda industry, regions: quotes)
+    monkeypatch.setattr(data, "get_fx_to", lambda target, currencies: {"EUR": 1.0, "GBP": 1.19, "SEK": 0.089, "PLN": 0.22})
+    info = {"industry": "Aerospace & Defense", "country": "France", "currency": "EUR", "marketCap": 48e9, "shortName": "Thales S.A."}
+    peers = data.suggest_peers("HO.PA", info, n=3)
+    # BAE 65 Md€ et Rheinmetall 36 Md€ sont les plus proches de 48 Md€, puis Saab (30 Md€)
+    assert peers == ["RHM.DE", "BA.L", "SAAB-B.ST"]
+    assert not {"BAL.XC", "GCP.F", "RHM.WA", "SPX.DE", "HO.PA"} & set(data.suggest_peers("HO.PA", info, n=10))
