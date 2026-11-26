@@ -140,7 +140,7 @@ def test_suggestion_de_pairs_filtre_et_classe(monkeypatch):
     monkeypatch.setattr(data, "get_fx_to", lambda target, currencies: {"EUR": 1.0, "GBP": 1.19, "SEK": 0.089, "PLN": 0.22})
     countries = {"RHM.DE": "Germany", "BA.L": "United Kingdom", "SAAB-B.ST": "Sweden", "AIR.PA": "France",
                  "HRS.DE": "United States"}
-    monkeypatch.setattr(data, "_raw_profile", lambda t: {"country": countries.get(t), "shortName": t})
+    monkeypatch.setattr(data, "_raw_profile", lambda t: {"country": countries.get(t), "longName": t})
     quotes.append({"symbol": "HRS.DE", "shortName": "L3Harris Technologies Inc.    R", "marketCap": 47e9,
                    "currency": "EUR", "trailingPE": 25})  # société US cotée à Francfort : écartée par le pays
     info = {"industry": "Aerospace & Defense", "country": "France", "currency": "EUR", "marketCap": 48e9, "shortName": "Thales S.A."}

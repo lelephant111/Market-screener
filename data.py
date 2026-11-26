@@ -1159,11 +1159,21 @@ def suggest_peers(ticker: str, info: dict, n: int = 6) -> list:
     from concurrent.futures import ThreadPoolExecutor
     with ThreadPoolExecutor(max_workers=8) as pool:
         profiles = list(pool.map(_raw_profile, shortlist))
+    # Une seule ligne par société : les actions ordinaires et préférentielles (VOW.DE / VOW3.DE)
+    # ont des noms courts différents mais le même nom officiel.
+    seen_companies = {_canonical_name(info.get("longName") or info.get("shortName") or ticker)}
     kept = []
     for sym, prof in zip(shortlist, profiles):
+        if not prof:
+            continue
         country_code = _COUNTRY_CODES.get(prof.get("country") or "")
-        if prof and country_code is not None and (country_code in zone or (country_code == "lu" and "fr" in zone)):
-            kept.append(sym)
+        if country_code is None or not (country_code in zone or (country_code == "lu" and "fr" in zone)):
+            continue
+        company = _canonical_name(prof.get("longName") or prof.get("shortName") or sym)
+        if company in seen_companies:
+            continue
+        seen_companies.add(company)
+        kept.append(sym)
         if len(kept) == n:
             break
     return kept
