@@ -16,11 +16,11 @@ st.markdown(
     <div style="padding: 2rem 0 1.5rem 0;">
         <div style="font-size:0.65rem;font-weight:700;letter-spacing:0.25em;
                     color:{C['orange']};text-transform:uppercase;margin-bottom:0.5rem;">
-            MARKET TERMINAL
+            EQUITY RESEARCH
         </div>
         <div style="font-size:2rem;font-weight:700;color:{C['text']};
                     letter-spacing:-0.02em;line-height:1.1;">
-            Hedge Fund Tool
+            Meridian
         </div>
         <div style="font-size:0.82rem;color:{C['muted']};margin-top:0.4rem;
                     letter-spacing:0.02em;">

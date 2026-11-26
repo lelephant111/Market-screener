@@ -165,7 +165,7 @@ def make_screen(mode: str):
         return {"quotes": [
             {"symbol": f"T{i}.PA", "shortName": f"Societe {i}", "regularMarketPrice": 10.0 + i,
              "regularMarketChangePercent": 0.5 - i * 0.1, "marketCap": (i + 1) * 1e9,
-             "trailingPE": 12.0 + i, "forwardPE": 11.0, "fiftyTwoWeekChangePercent": 0.1,
+             "trailingPE": 12.0 + i, "forwardPE": 11.0, "fiftyTwoWeekChangePercent": 12.5,
              "averageDailyVolume3Month": 1e6, "currency": "EUR"}
             for i in range(10)
         ]}
@@ -258,7 +258,8 @@ def test_screener(yahoo):
         assert any("refuse les requêtes" in e.value for e in at.error)
     else:
         assert not at.error
-        assert at.dataframe
+        table = at.dataframe[0].value
+        assert table["52S%"].iloc[0] == "+12.5%"  # Yahoo renvoie déjà des %, pas de x100
 
 
 def test_relative_performance(yahoo):
@@ -271,3 +272,11 @@ def test_watchlist(yahoo, tmp_path, monkeypatch):
     wl.write_text('["AAPL", "AIR.PA"]')
     monkeypatch.setattr(data, "WATCHLIST_FILE", wl)
     run_page("watchlist.py")
+
+
+def test_screener_desactive_en_ligne(yahoo, monkeypatch):
+    import data
+    monkeypatch.setattr(data, "is_streamlit_cloud", lambda: True)
+    at = run_page("screener.py")
+    assert at.button[0].disabled
+    assert any("Disponible en local uniquement" in i.value for i in at.info)

@@ -31,7 +31,7 @@ WATCHLIST_PAGE = "pages/watchlist.py"
 
 def configure_app() -> None:
     st.set_page_config(
-        page_title="Hedge Fund Tool",
+        page_title="Meridian",
         page_icon="📊",
         layout="wide",
         initial_sidebar_state="expanded",
@@ -97,7 +97,7 @@ def apply_theme() -> None:
         [data-testid="stSidebarNav"] { padding-top: 1rem; }
 
         [data-testid="stSidebarNav"]::before {
-            content: "MARKET TERMINAL";
+            content: "MERIDIAN";
             display: block;
             padding: 0 0.5rem 1rem 0.5rem;
             color: var(--orange);
