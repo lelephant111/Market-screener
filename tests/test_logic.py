@@ -7,6 +7,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from charts import earnings_chart, profitability_chart, scorecard_chart  # noqa: E402
+from data import compute_indicators  # noqa: E402
 from data import _EU_COUNTRIES, _EU_EX_UK_COUNTRIES, _clean_screener_quotes, is_yahoo_blocked_error  # noqa: E402
 from utils import compute_scores, compute_zacks_ratings, fmt_large, fmt_price  # noqa: E402
 
@@ -60,3 +61,27 @@ def test_erreur_401_reconnue_comme_blocage():
     assert is_yahoo_blocked_error(Exception("HTTP Error 401: "))
     assert is_yahoo_blocked_error(Exception("Too Many Requests. Rate limited."))
     assert not is_yahoo_blocked_error(Exception("ticker inconnu"))
+
+
+def test_rsi_methode_de_wilder():
+    import numpy as np
+    rng = np.random.default_rng(7)
+    close = pd.Series(100 * np.exp(np.cumsum(rng.normal(0, 0.02, 120))))
+    df = compute_indicators(pd.DataFrame({"Close": close}))
+
+    # Référence : Wilder "à la main" (moyenne simple des 14 premiers écarts, puis lissage 13/14)
+    delta = close.diff().dropna().to_numpy()
+    gains, losses = np.clip(delta, 0, None), np.clip(-delta, 0, None)
+    avg_g, avg_l = gains[:14].mean(), losses[:14].mean()
+    for g, l in zip(gains[14:], losses[14:]):
+        avg_g = (avg_g * 13 + g) / 14
+        avg_l = (avg_l * 13 + l) / 14
+    expected = 100 - 100 / (1 + avg_g / avg_l)
+    # ewm(adjust=False) démarre différemment, l'écart disparaît après une centaine de séances
+    assert abs(df["RSI"].iloc[-1] - expected) < 0.5
+    assert df["RSI"].dropna().between(0, 100).all()
+
+
+def test_rsi_que_des_hausses_vaut_100():
+    close = pd.Series(range(1, 40), dtype=float)
+    assert compute_indicators(pd.DataFrame({"Close": close}))["RSI"].iloc[-1] == 100

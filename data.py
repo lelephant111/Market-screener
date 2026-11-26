@@ -32,6 +32,12 @@ except Exception:  # pragma: no cover - très anciennes versions de yfinance
 TREASURY_SYMBOLS = {"^IRX", "^FVX", "^TNX", "^TYX"}
 
 
+def is_streamlit_cloud() -> bool:
+    """Vrai quand l'app tourne sur Streamlit Community Cloud (le code y est monté dans /mount/src)."""
+    import os
+    return Path(__file__).resolve().as_posix().startswith("/mount/src/") or os.environ.get("HOSTNAME") == "streamlit"
+
+
 def is_rate_limit_error(exc: Exception) -> bool:
     """Vrai si l'erreur vient du blocage Yahoo (trop de requêtes)."""
     if isinstance(exc, YFRateLimitError):
@@ -651,11 +657,14 @@ def compute_indicators(history: pd.DataFrame) -> pd.DataFrame:
     # Mesure la force des hausses vs baisses récentes. Echelle 0-100.
     # > 70 = suracheté (signal de vente possible)
     # < 30 = survendu  (signal d'achat possible)
-    delta   = df['Close'].diff()                          # variation jour par jour
-    gain    = delta.clip(lower=0).rolling(14).mean()      # moyenne des jours en hausse
-    loss    = (-delta.clip(upper=0)).rolling(14).mean()   # moyenne des jours en baisse
-    rs      = gain / loss                                 # ratio gain/perte
+    # Méthode de Wilder (standard Bloomberg / TradingView) : moyenne lissée
+    # exponentielle avec alpha = 1/14, et non une moyenne simple sur 14 jours.
+    delta   = df['Close'].diff()                                              # variation jour par jour
+    gain    = delta.clip(lower=0).ewm(alpha=1 / 14, adjust=False, min_periods=14).mean()
+    loss    = (-delta.clip(upper=0)).ewm(alpha=1 / 14, adjust=False, min_periods=14).mean()
+    rs      = gain / loss                                                     # ratio gain/perte
     df['RSI'] = 100 - (100 / (1 + rs))
+    df.loc[(loss == 0) & (gain > 0), 'RSI'] = 100.0                           # que des hausses
 
     # --- MACD ---
     # Montre l'élan (momentum) du prix via la différence entre deux EMA.

@@ -1,4 +1,4 @@
-# Hedge Fund Tool — Documentation Projet
+# Meridian (ex Hedge Fund Tool) : documentation projet
 
 ## Objectif
 Construire un outil personnel d'analyse actions et marché, pensé pour un usage quotidien de type analyste Long/Short Equity.
@@ -15,7 +15,7 @@ L'application doit être :
 ## État Actuel Du Projet
 
 ### Déploiement
-- **Local** : `cd ~/hedge-fund-tool && python3 -m streamlit run app.py`
+- **Local** (version complète, recommandée) : double-clic sur `launch_hedge_fund_tool.command` dans `~/Documents/hedge-fund-tool`
 - **En ligne** : https://market-screener-9vxvam2yi8w5dgjbpbplt5.streamlit.app
 - **GitHub** : https://github.com/lelephant111/Market-screener
 - Workflow mise à jour : modifier localement → `git add . && git commit -m "..." && git push` → Streamlit Cloud redéploie automatiquement
@@ -43,21 +43,18 @@ Pages actuellement disponibles :
 - `Watchlist`
 
 ### Lancement
-L'outil se lance localement via :
+Version complète : en local sur le Mac, car Yahoo bloque Streamlit Cloud pour les fondamentaux et le screener.
 
-```bash
-cd ~/hedge-fund-tool
-python3 -m streamlit run app.py
-```
+Double-clic sur `~/Documents/hedge-fund-tool/launch_hedge_fund_tool.command` (fichier local, non versionné, `*.command` est dans `.gitignore`). Le lanceur :
+- fait un `git pull --ff-only` pour récupérer la dernière version
+- crée `.venv` avec Python 3.11+ au premier lancement (Streamlit récent exige Python 3.11+)
+- réinstalle `requirements.txt` seulement quand le fichier change
+- lance Streamlit sur le port 8501 et affiche la Network URL (téléphone sur le même Wi-Fi)
+- si l'app tourne déjà, ouvre simplement le navigateur
 
-Un lanceur local existe aussi :
-- `launch_hedge_fund_tool.command`
-- raccourci bureau : `Ouvrir Outil HF.command`
+Le serveur s'arrête quand la fenêtre Terminal est fermée.
 
-Important :
-- le lanceur ne tourne plus en fond
-- il ouvre un Terminal visible
-- le serveur Streamlit s'arrête quand la fenêtre Terminal est fermée
+Version en ligne (Streamlit Cloud) : prix, technique, marché et états financiers ; le Screener y est désactivé (`is_streamlit_cloud()` dans `data.py`).
 
 ---
 
@@ -268,6 +265,13 @@ Fonctionnalités actuelles :
 
 ## Ce Qui A Été Fait Récemment (2026-11-26)
 
+### Lot 3 : finitions
+- nouveau nom : Meridian (Equity Research)
+- RSI calculé avec la méthode de Wilder (comme Bloomberg / TradingView)
+- Screener : "52S%" n'est plus multiplié par 100 (Yahoo le renvoie déjà en %)
+- Screener désactivé en ligne avec un message "Disponible en local uniquement"
+- vérifié : la croissance du BPA à 18 % pour Apple et Thales est une coïncidence, pas un bug
+
 ### Lot 1 : données Yahoo
 - yfinance 1.8.0, échecs Yahoo jamais mis en cache, un nouvel essai automatique
 - Market Overview : un seul téléchargement groupé
@@ -287,7 +291,7 @@ Fonctionnalités actuelles :
 
 ### Design Bloomberg
 - Thème complet refait : fond noir #060B14, accent orange #FF6600, font monospace
-- Sidebar "MARKET TERMINAL", barre orange sur page active
+- Sidebar avec titre, barre orange sur page active
 - Cards avec bordure top orange, boutons uppercase rectangulaires
 - Suppression des gradients décoratifs → look terminal instit
 

@@ -1,7 +1,14 @@
 import pandas as pd
 import streamlit as st
 
-from data import SCREENER_REGIONS, SCREENER_SECTORS, SCREENER_SORT_OPTIONS, is_yahoo_blocked_error, screen_universe
+from data import (
+    SCREENER_REGIONS,
+    SCREENER_SECTORS,
+    SCREENER_SORT_OPTIONS,
+    is_streamlit_cloud,
+    is_yahoo_blocked_error,
+    screen_universe,
+)
 from ui import open_stock_page, page_hero
 from utils import fmt_large
 
@@ -33,7 +40,14 @@ with st.expander("Filtres avancés", expanded=False):
     week52_min     = fc.number_input("Perf 52S min (%)", value=-100.0, step=5.0)
     change_min     = fd.number_input("Variation 1J min (%)", value=-100.0, step=0.5)
 
-run = st.button("LANCER LE SCREENER", type="primary", width='stretch')
+ONLINE = is_streamlit_cloud()
+if ONLINE:
+    st.info(
+        "**Disponible en local uniquement.** Sur la version en ligne, Yahoo Finance bloque le Screener. "
+        "Lance l'outil sur ton ordinateur (double-clic sur le lanceur) pour l'utiliser."
+    )
+
+run = st.button("LANCER LE SCREENER", type="primary", width='stretch', disabled=ONLINE)
 
 # Clé représentant les paramètres du dernier run — si les filtres changent, on invalide le cache
 current_filter_key = (region_label, sector_label, sort_label, size)
@@ -42,7 +56,8 @@ if not run and st.session_state.get("screener_filter_key") != current_filter_key
     st.session_state.pop("screener_filter_key", None)
 
 if not run and "screener_results" not in st.session_state:
-    st.info("Configure les filtres puis clique sur LANCER LE SCREENER.")
+    if not ONLINE:
+        st.info("Configure les filtres puis clique sur LANCER LE SCREENER.")
     st.stop()
 
 if run:
@@ -87,22 +102,25 @@ for q in quotes:
         "Market Cap":   fmt_large(mktcap, currency) if mktcap else "N/A",
         "P/E TTM":      round(trailing_pe, 1) if trailing_pe else None,
         "P/E Fwd":      round(forward_pe, 1) if forward_pe else None,
-        "52S%":         round(wk52_chg * 100, 1) if wk52_chg else None,
+        # Yahoo renvoie déjà ce champ en % (ex : -7.8 pour -7,8 %)
+        "52S%":         round(wk52_chg, 1) if wk52_chg is not None else None,
         "Rating":       rating,
         # raw pour filtres
         "_mktcap_b":    (mktcap or 0) / 1e9,
         "_trailing_pe": trailing_pe,
-        "_52s":         (wk52_chg or 0) * 100,
+        "_52s":         wk52_chg,
         "_1d":          chg_pct or 0,
     })
 
 df = pd.DataFrame(rows)
+for col in ("_mktcap_b", "_trailing_pe", "_52s", "_1d"):
+    df[col] = pd.to_numeric(df[col], errors="coerce")
 
 # ── Application des filtres avancés ────────────────────────────────
 df = df[
     (df["_mktcap_b"] >= market_cap_min) &
     (df["_trailing_pe"].isna() | (df["_trailing_pe"] <= pe_max)) &
-    (df["_52s"] >= week52_min) &
+    ((df["_52s"] >= week52_min) | (df["_52s"].isna() & (week52_min <= -100))) &
     (df["_1d"] >= change_min)
 ]
 
