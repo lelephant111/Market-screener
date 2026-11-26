@@ -171,6 +171,7 @@ Fonctionnalités actuelles :
 - positionnement
 - earnings et estimations
 - consensus analystes
+- comparaison avec les pairs (multiples, croissance, marges, levier, médiane) ; ratings relatifs aux pairs
 - prix cibles
 - transactions insiders
 - analyse technique
@@ -183,7 +184,7 @@ Points déjà sécurisés :
 - protection contre les données Yahoo incomplètes
 
 ### 3. Market Overview
-La page marché a été fortement enrichie.
+Menu "Marché" en haut : États-Unis, Europe, Asie. Les sections sans données pour une zone sont masquées (ex : courbe des taux hors US).
 
 Organisation actuelle :
 
@@ -264,6 +265,15 @@ Fonctionnalités actuelles :
 ---
 
 ## Ce Qui A Été Fait Récemment (2026-11-26)
+
+### Lot 4 : marchés par zone, pairs, ratings relatifs
+- Market Overview : menu "Marché" États-Unis / Europe / Asie (`MARKET_REGIONS` dans `data.py`), vrais indices (plus d'ETF), un téléchargement groupé par zone
+- Europe : 9 indices, 19 ETFs sectoriels Stoxx 600 (iShares, Xetra), EUR/USD, EUR/GBP, or, Brent ; Asie : 7 indices, USD/JPY, USD/CNY
+- Yahoo n'a ni VSTOXX ni taux du Bund / JGB : hors US, la volatilité affichée est la volatilité réalisée 20 j de l'indice principal, et le sentiment est un proxy maison
+- rotation sectorielle avec horizon 1J / 1M / 3M
+- Stock Analysis : section "Comparaison avec les pairs" (6 pairs suggérés, modifiables, médiane, prime/décote)
+- pairs suggérés = même industrie Yahoo + même zone + capitalisation la plus proche (convertie en devise commune) ; filtres : cotations secondaires, sociétés étrangères (pays du profil), doublons de classes d'actions
+- ratings Value / Growth (Zacks-style) et scorecard Valorisation / Qualité / Croissance relatifs à la médiane des pairs ; seuils absolus seulement si pas de pairs (version en ligne)
 
 ### Lot 3 : finitions
 - nouveau nom : Meridian (Equity Research)
@@ -385,7 +395,6 @@ Chaque bloc doit répondre à une question d'investisseur :
 - ajouter vrai put/call ratio si source fiable disponible
 - ajouter calendar macro (Fed, CPI, NFP)
 - ajouter upcoming earnings de grandes caps
-- enrichir `Stock Analysis` avec comparaison de peers
 
 ### Priorité 2 — Forte valeur analytique
 - ajouter export CSV au screener
@@ -413,7 +422,6 @@ Chaque bloc doit répondre à une question d'investisseur :
 
 ### Stock Analysis
 À ajouter ou améliorer :
-- peers comparables
 - résumé d'investissement
 - thèse bull / bear / risques
 - qualité du cash-flow

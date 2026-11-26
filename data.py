@@ -1245,7 +1245,7 @@ def get_peer_table(tickers: tuple, base_currency: str) -> pd.DataFrame:
         cap = p.get("marketCap")
         row = {
             "ticker": ticker,
-            "name": p.get("shortName") or p.get("longName") or ticker,
+            "name": p.get("longName") or p.get("shortName") or ticker,  # nom officiel, plus propre que le nom court
             "country": p.get("country"),
             "available": True,
             "market_cap": cap * rate if cap and rate else None,
