@@ -5,6 +5,16 @@
 #   - 300s (5 min)  pour les données de prix intraday
 #   - 3600s (1h)    pour les fondamentaux qui changent rarement
 
+#
+# Règle importante sur le cache :
+#   st.cache_data ne met PAS en cache une fonction qui lève une exception.
+#   Les fonctions "_fetch_*" lèvent donc une erreur quand Yahoo échoue
+#   (rate limit, réponse vide), pour qu'un échec ne reste pas bloqué en cache
+#   pendant 1h. Les fonctions publiques "get_*" attrapent l'erreur et renvoient
+#   une valeur vide propre à afficher.
+
+import time
+
 import streamlit as st
 import yfinance as yf
 import pandas as pd
@@ -12,12 +22,41 @@ import requests
 import json
 from pathlib import Path
 
+try:
+    from yfinance.exceptions import YFRateLimitError
+except Exception:  # pragma: no cover - très anciennes versions de yfinance
+    class YFRateLimitError(Exception):
+        pass
+
+# Taux US : Yahoo les renvoie déjà en % (ex : 4.35 pour 4.35 %).
 TREASURY_SYMBOLS = {"^IRX", "^FVX", "^TNX", "^TYX"}
+
+
+def is_rate_limit_error(exc: Exception) -> bool:
+    """Vrai si l'erreur vient du blocage Yahoo (trop de requêtes)."""
+    if isinstance(exc, YFRateLimitError):
+        return True
+    text = str(exc).lower()
+    return "too many requests" in text or "rate limit" in text or "429" in text
+
+
+def _with_retry(func, *args, attempts: int = 2, wait: float = 1.5):
+    """Appelle func(*args). En cas de blocage Yahoo, réessaie une fois après une courte pause."""
+    for attempt in range(attempts):
+        try:
+            return func(*args)
+        except Exception as exc:
+            if attempt < attempts - 1 and is_rate_limit_error(exc):
+                time.sleep(wait)
+                continue
+            raise
 
 
 def _flatten_download(df: pd.DataFrame) -> pd.DataFrame:
     """yf.download() retourne un MultiIndex ('Close','NVDA') pour un seul ticker.
     Cette fonction le réduit à un Index simple ('Close', 'Open', …)."""
+    if df is None:
+        return pd.DataFrame()
     if df.empty:
         return df
     if isinstance(df.columns, pd.MultiIndex):
@@ -26,14 +65,9 @@ def _flatten_download(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def _normalize_quote_value(symbol: str, value):
-    """
-    Yahoo renvoie les taux US en dixièmes de pourcent pour certains symboles
-    obligataires (ex: 43.5 pour 4.35%). On les remet en % lisible.
-    """
-    if value is None or (isinstance(value, float) and pd.isna(value)):
-        return None
-    return value / 10 if symbol in TREASURY_SYMBOLS else value
+def _as_frame(value) -> pd.DataFrame:
+    """yfinance renvoie parfois None ou un dict au lieu d'un DataFrame."""
+    return value if isinstance(value, pd.DataFrame) else pd.DataFrame()
 
 
 def _normalize_calendar_value(value):
@@ -224,9 +258,14 @@ def screen_universe(region, sector, sort_field: str, size: int) -> list:
     if sector:
         filters.append(EquityQuery('eq', ['sector', sector]))
 
+    # Yahoo refuse toute requête au-delà de 250 résultats
+    fetch_size = min(fetch_size, 250)
+
     query = EquityQuery('and', filters) if len(filters) > 1 else filters[0]
-    result = yf_screen(query, sortField=effective_sort, sortAsc=False, size=fetch_size)
-    quotes = result.get('quotes', [])
+    result = _with_retry(
+        lambda: yf_screen(query, sortField=effective_sort, sortAsc=False, size=fetch_size)
+    )
+    quotes = (result or {}).get('quotes', [])
     cleaned = _clean_screener_quotes(quotes, is_european=is_european)
     return cleaned[:size]
 
@@ -235,7 +274,30 @@ def screen_universe(region, sector, sort_field: str, size: int) -> list:
 # RECHERCHE DE TICKERS
 # -------------------------------------------------------
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=300, show_spinner=False)
+def _fetch_search(query: str) -> list:
+    url = "https://query2.finance.yahoo.com/v1/finance/search"
+    params = {
+        "q":           query,
+        "quotesCount": 8,      # max 8 résultats
+        "newsCount":   0,      # on ne veut pas les news
+        "listsCount":  0,
+    }
+    headers = {"User-Agent": "Mozilla/5.0"}
+    resp = requests.get(url, params=params, headers=headers, timeout=5)
+    resp.raise_for_status()
+    quotes = resp.json().get("quotes", [])
+    return [
+        {
+            "symbol": q["symbol"],
+            "name":   q.get("shortname") or q.get("longname") or q["symbol"],
+            "type":   q.get("quoteType", ""),
+        }
+        for q in quotes
+        if q.get("symbol") and q.get("quoteType") in ("EQUITY", "ETF", "INDEX")
+    ]
+
+
 def search_tickers(query: str) -> list:
     """
     Recherche des tickers via l'API de recherche Yahoo Finance.
@@ -248,26 +310,7 @@ def search_tickers(query: str) -> list:
     if not query or len(query.strip()) < 2:
         return []
     try:
-        url = "https://query2.finance.yahoo.com/v1/finance/search"
-        params = {
-            "q":           query.strip(),
-            "quotesCount": 8,      # max 8 résultats
-            "newsCount":   0,      # on ne veut pas les news
-            "listsCount":  0,
-        }
-        headers = {"User-Agent": "Mozilla/5.0"}
-        resp = requests.get(url, params=params, headers=headers, timeout=5)
-        resp.raise_for_status()
-        quotes = resp.json().get("quotes", [])
-        return [
-            {
-                "symbol": q["symbol"],
-                "name":   q.get("shortname") or q.get("longname") or q["symbol"],
-                "type":   q.get("quoteType", ""),
-            }
-            for q in quotes
-            if q.get("symbol") and q.get("quoteType") in ("EQUITY", "ETF", "INDEX")
-        ]
+        return _fetch_search(query.strip())
     except Exception:
         return []
 
@@ -385,118 +428,179 @@ def _supplement_fundamentals(stock, info: dict) -> None:
         pass
 
 
-@st.cache_data(ttl=60)
-def get_stock_info(ticker: str) -> dict:
-    info = {}
+# Clés qui prouvent que Yahoo a bien renvoyé le profil complet de la société
+_PROFILE_KEYS = ("longName", "shortName", "quoteType", "sector")
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def _fetch_full_info(ticker: str) -> dict:
+    """Profil complet Yahoo (fondamentaux, multiples, consensus). Lève une erreur si Yahoo bloque."""
+    fetched = yf.Ticker(ticker).info
+    if not isinstance(fetched, dict) or not any(fetched.get(k) for k in _PROFILE_KEYS):
+        raise RuntimeError(f"Profil Yahoo incomplet pour {ticker}")
+    return dict(fetched)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _fetch_price_snapshot(ticker: str) -> dict:
+    """
+    Prix, clôture de la veille, devise, market cap via les endpoints légers
+    (fast_info puis historique de prix), qui sont rarement bloqués.
+    """
+    snap = {}
     stock = yf.Ticker(ticker)
 
-    # Source 1 : info complet (fondamentaux + prix)
     try:
-        fetched = stock.info
-        if fetched and isinstance(fetched, dict) and len(fetched) > 5:
-            info = dict(fetched)
+        fi = stock.fast_info
+        for attr, key in [
+            ("last_price", "currentPrice"),
+            ("previous_close", "previousClose"),
+            ("market_cap", "marketCap"),
+            ("currency", "currency"),
+            ("year_high", "fiftyTwoWeekHigh"),
+            ("year_low", "fiftyTwoWeekLow"),
+        ]:
+            try:
+                val = getattr(fi, attr, None)
+                if val is not None and not (isinstance(val, float) and pd.isna(val)):
+                    snap[key] = float(val) if key != "currency" else val
+            except Exception:
+                continue
     except Exception:
         pass
 
-    # Source 2 : fast_info (endpoint plus léger, moins bloqué)
-    if not info.get("currentPrice") and not info.get("regularMarketPrice"):
+    if not snap.get("currentPrice") or not snap.get("previousClose"):
+        hist = _flatten_download(
+            yf.download(ticker, period="5d", progress=False, auto_adjust=False)
+        )
+        closes = hist["Close"].dropna() if not hist.empty and "Close" in hist else pd.Series(dtype=float)
+        if len(closes) >= 1:
+            snap.setdefault("currentPrice", float(closes.iloc[-1]))
+        if len(closes) >= 2:
+            snap.setdefault("previousClose", float(closes.iloc[-2]))
+
+    if not snap.get("currentPrice"):
+        raise RuntimeError(f"Aucune donnée de prix disponible pour {ticker}")
+    return snap
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _fetch_statement_fundamentals(ticker: str) -> dict:
+    """Marges, croissance, dette, FCF recalculés depuis les états financiers publiés."""
+    computed = {}
+    _supplement_fundamentals(yf.Ticker(ticker), computed)
+    return computed
+
+
+def get_stock_info(ticker: str) -> dict:
+    """
+    Assemble les données d'une société à partir de 3 sources, de la plus riche à la plus robuste :
+      1. profil complet Yahoo (peut être bloqué sur Streamlit Cloud)
+      2. prix + clôture de la veille (endpoints légers)
+      3. états financiers (pour recalculer marges, croissance, dette)
+    La clé "_partial" vaut True quand le profil complet n'a pas pu être chargé.
+    La clé "_rate_limited" vaut True quand c'est à cause du blocage Yahoo.
+    """
+    info = {}
+    partial = False
+    rate_limited = False
+
+    try:
+        info = dict(_with_retry(_fetch_full_info, ticker))
+    except Exception as exc:
+        partial = True
+        rate_limited = is_rate_limit_error(exc)
+
+    if not info.get("currentPrice"):
+        info["currentPrice"] = info.get("regularMarketPrice")
+    if not info.get("previousClose"):
+        info["previousClose"] = info.get("regularMarketPreviousClose")
+
+    if not info.get("currentPrice") or not info.get("previousClose"):
         try:
-            fi = stock.fast_info
-            last = fi.last_price
-            if last and not pd.isna(last):
-                info["currentPrice"] = float(last)
-                for attr, key in [("market_cap", "marketCap"), ("currency", "currency"),
-                                   ("fifty_two_week_high", "fiftyTwoWeekHigh"),
-                                   ("fifty_two_week_low", "fiftyTwoWeekLow")]:
-                    try:
-                        val = getattr(fi, attr, None)
-                        if val is not None and not (isinstance(val, float) and pd.isna(val)):
-                            info.setdefault(key, val)
-                    except Exception:
-                        pass
+            snap = _fetch_price_snapshot(ticker)
+            for key, value in snap.items():
+                if not info.get(key):
+                    info[key] = value
         except Exception:
             pass
 
-    # Source 3 : yf.download — endpoint chart API, le plus résistant au rate-limit
-    if not info.get("currentPrice") and not info.get("regularMarketPrice"):
-        try:
-            hist = _flatten_download(
-                yf.download(ticker, period="5d", progress=False, auto_adjust=True)
-            )
-            if not hist.empty:
-                info["currentPrice"] = float(hist["Close"].iloc[-1])
-                if len(hist) >= 2:
-                    prev = float(hist["Close"].iloc[-2])
-                    info.setdefault("previousClose", prev)
-        except Exception:
-            pass
-
-    # Si aucune source n'a fourni un prix, on lève pour ne pas cacher l'échec
-    if not info.get("currentPrice") and not info.get("regularMarketPrice"):
+    if not info.get("currentPrice"):
         raise RuntimeError(f"Aucune donnée de prix disponible pour {ticker}")
 
-    # Source 4 : états financiers — fallback si stock.info incomplet (rate-limit cloud)
-    _supplement_fundamentals(stock, info)
+    has_fundamentals = any(info.get(k) for k in ("grossMargins", "trailingPE", "totalRevenue"))
+    if not has_fundamentals:
+        try:
+            for key, value in _fetch_statement_fundamentals(ticker).items():
+                info.setdefault(key, value)
+        except Exception:
+            pass
 
+    info["_partial"] = partial
+    info["_rate_limited"] = rate_limited
     return info
 
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=300, show_spinner=False)
+def _fetch_history(ticker: str, period: str) -> pd.DataFrame:
+    df = _flatten_download(yf.download(ticker, period=period, progress=False, auto_adjust=True))
+    if df.empty:
+        df = yf.Ticker(ticker).history(period=period)
+    if df is None or df.empty:
+        raise RuntimeError(f"Historique vide pour {ticker}")
+    # Index sans fuseau horaire : permet de comparer des titres de places différentes
+    if getattr(df.index, "tz", None) is not None:
+        df = df.copy()
+        df.index = df.index.tz_localize(None)
+    return df
+
+
 def get_stock_history(ticker: str, period: str = "1y") -> pd.DataFrame:
     """
     Récupère l'historique OHLCV (Open, High, Low, Close, Volume) d'un stock.
     period : '1mo', '3mo', '6mo', '1y', '2y', '5y'
     """
-    # yf.download() est plus résistant au rate-limit que Ticker.history()
     try:
-        df = _flatten_download(
-            yf.download(ticker, period=period, progress=False, auto_adjust=True)
-        )
-        if not df.empty:
-            return df
-    except Exception:
-        pass
-    try:
-        return yf.Ticker(ticker).history(period=period)
+        return _with_retry(_fetch_history, ticker, period)
     except Exception:
         return pd.DataFrame()
 
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=3600, show_spinner=False)
+def _fetch_recommendations(ticker: str) -> pd.DataFrame:
+    return _as_frame(yf.Ticker(ticker).recommendations)
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _fetch_earnings_history(ticker: str) -> pd.DataFrame:
+    return _as_frame(yf.Ticker(ticker).earnings_history)
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _fetch_insider_transactions(ticker: str) -> pd.DataFrame:
+    return _as_frame(yf.Ticker(ticker).insider_transactions)
+
+
+def _safe_frame(fetcher, ticker: str) -> pd.DataFrame:
+    try:
+        return _with_retry(fetcher, ticker)
+    except Exception:
+        return pd.DataFrame()
+
+
 def get_analyst_recommendations(ticker: str) -> pd.DataFrame:
-    """
-    Récupère l'historique des recommandations analystes (Buy/Hold/Sell).
-    Cache 1h car ces données changent rarement.
-    """
-    try:
-        stock = yf.Ticker(ticker)
-        return stock.recommendations
-    except Exception:
-        return pd.DataFrame()
+    """Historique des recommandations analystes (Buy/Hold/Sell). Vide si indisponible."""
+    return _safe_frame(_fetch_recommendations, ticker)
 
 
-@st.cache_data(ttl=3600)
 def get_earnings_history(ticker: str) -> pd.DataFrame:
-    """
-    Récupère l'historique des earnings (EPS réel vs estimé par trimestre).
-    """
-    try:
-        stock = yf.Ticker(ticker)
-        return stock.earnings_history
-    except Exception:
-        return pd.DataFrame()
+    """Historique des earnings (EPS réel vs estimé par trimestre). Vide si indisponible."""
+    return _safe_frame(_fetch_earnings_history, ticker)
 
 
-@st.cache_data(ttl=3600)
 def get_insider_transactions(ticker: str) -> pd.DataFrame:
-    """
-    Récupère les dernières transactions des insiders (dirigeants, actionnaires >10%).
-    """
-    try:
-        stock = yf.Ticker(ticker)
-        return stock.insider_transactions
-    except Exception:
-        return pd.DataFrame()
+    """Dernières transactions des insiders. Vide si indisponible."""
+    return _safe_frame(_fetch_insider_transactions, ticker)
 
 
 def compute_indicators(history: pd.DataFrame) -> pd.DataFrame:
@@ -548,17 +652,19 @@ def compute_indicators(history: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=3600, show_spinner=False)
+def _fetch_calendar(ticker: str) -> dict:
+    normalized = _normalize_calendar_value(yf.Ticker(ticker).calendar)
+    return normalized if isinstance(normalized, dict) else {}
+
+
 def get_calendar(ticker: str) -> dict:
     """
     Récupère le prochain earnings date et les estimations.
     Retourne un dict avec 'Earnings Date', 'EPS Estimate', 'Revenue Estimate'.
     """
     try:
-        stock = yf.Ticker(ticker)
-        cal = stock.calendar
-        normalized = _normalize_calendar_value(cal)
-        return normalized if isinstance(normalized, dict) else {}
+        return _with_retry(_fetch_calendar, ticker)
     except Exception:
         return {}
 
@@ -567,92 +673,140 @@ def get_calendar(ticker: str) -> dict:
 # MARCHÉ — DONNÉES GLOBALES
 # -------------------------------------------------------
 
-@st.cache_data(ttl=300)
-def get_market_data() -> dict:
-    """
-    Récupère les données des principaux indices et taux.
-    Retourne un dict : { "S&P 500": {"value": 5200.0, "change": -0.5}, ... }
-    """
-    indices = {
-        "S&P 500":       "^GSPC",
-        "NASDAQ":        "^IXIC",
-        "Dow Jones":     "^DJI",
-        "Russell 2000":  "^RUT",
-        "VIX":           "^VIX",
-        "10Y Treasury":  "^TNX",
-    }
-    data = {}
-    for name, symbol in indices.items():
+# Tous les symboles du cockpit marché, téléchargés en UNE seule requête groupée
+# (avant : ~40 appels séparés, lents et qui aggravaient le blocage Yahoo).
+SNAPSHOT_ASSETS = {
+    "S&P 500":      {"symbol": "SPY",    "category": "Core Equity"},
+    "Nasdaq 100":   {"symbol": "QQQ",    "category": "Core Equity"},
+    "Dow Jones":    {"symbol": "DIA",    "category": "Core Equity"},
+    "Russell 2000": {"symbol": "IWM",    "category": "Core Equity"},
+    "VIX":          {"symbol": "^VIX",   "category": "Volatility"},
+    "VIX 3M":       {"symbol": "^VIX3M", "category": "Volatility"},
+    "10Y Treasury": {"symbol": "^TNX",   "category": "Rates"},
+    "Gold":         {"symbol": "GLD",    "category": "Cross-Asset"},
+    "US Dollar":    {"symbol": "UUP",    "category": "Cross-Asset"},
+}
+
+SECTOR_ETFS = {
+    "Tech":           "XLK",
+    "Finance":        "XLF",
+    "Santé":          "XLV",
+    "Énergie":        "XLE",
+    "Industrie":      "XLI",
+    "Conso. Disc.":   "XLY",
+    "Conso. Staples": "XLP",
+    "Matériaux":      "XLB",
+    "Immobilier":     "XLRE",
+    "Utilities":      "XLU",
+    "Télécom":        "XLC",
+}
+
+TREASURY_CURVE = {
+    "3M":  "^IRX",
+    "5Y":  "^FVX",
+    "10Y": "^TNX",
+    "30Y": "^TYX",
+}
+
+BREADTH_UNIVERSE = {
+    "SPY": "S&P 500",
+    "QQQ": "Nasdaq 100",
+    "DIA": "Dow Jones",
+    "IWM": "Russell 2000",
+    **{symbol: name for name, symbol in SECTOR_ETFS.items()},
+}
+
+MARKET_SYMBOLS = sorted(
+    {meta["symbol"] for meta in SNAPSHOT_ASSETS.values()}
+    | set(SECTOR_ETFS.values())
+    | set(TREASURY_CURVE.values())
+    | set(BREADTH_UNIVERSE.keys())
+)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _fetch_market_history() -> dict:
+    """Historique 1 an de tous les symboles marché, en un seul téléchargement groupé."""
+    raw = yf.download(
+        tickers=MARKET_SYMBOLS,
+        period="1y",
+        auto_adjust=True,
+        progress=False,
+        group_by="ticker",
+        threads=True,
+    )
+    if raw is None or raw.empty:
+        raise RuntimeError("Téléchargement marché vide")
+
+    frames = {}
+    for symbol in MARKET_SYMBOLS:
         try:
-            hist = yf.Ticker(symbol).history(period="2d")
-            if len(hist) >= 2:
-                prev    = _normalize_quote_value(symbol, hist['Close'].iloc[-2])
-                current = _normalize_quote_value(symbol, hist['Close'].iloc[-1])
-                if prev is None or current is None or prev == 0:
+            if isinstance(raw.columns, pd.MultiIndex):
+                if symbol not in raw.columns.get_level_values(0):
                     continue
-                change  = ((current - prev) / prev) * 100
-                data[name] = {"value": current, "change": change}
+                frame = raw[symbol]
+            else:
+                frame = raw
+            frame = frame.dropna(how="all")
+            if not frame.empty and "Close" in frame and frame["Close"].notna().any():
+                frames[symbol] = frame
         except Exception:
-            pass
-    return data
+            continue
+
+    if not frames:
+        raise RuntimeError("Aucun symbole marché exploitable")
+    return frames
 
 
-@st.cache_data(ttl=300)
+def get_market_history() -> dict:
+    """{symbole: DataFrame OHLCV} pour le cockpit marché. Dict vide si Yahoo ne répond pas."""
+    try:
+        return _with_retry(_fetch_market_history)
+    except Exception:
+        return {}
+
+
+def _close(frames: dict, symbol: str) -> pd.Series:
+    frame = frames.get(symbol)
+    if frame is None or "Close" not in frame:
+        return pd.Series(dtype=float)
+    return frame["Close"].dropna()
+
+
+def _day_change_pct(close: pd.Series):
+    if len(close) < 2:
+        return None
+    prev, last = close.iloc[-2], close.iloc[-1]
+    if prev == 0 or pd.isna(prev) or pd.isna(last):
+        return None
+    return float((last - prev) / prev * 100)
+
+
 def get_sector_performance() -> dict:
     """
-    Récupère la performance du jour pour chaque secteur S&P via les ETFs XL*.
+    Performance du jour pour chaque secteur S&P via les ETFs XL*.
     Retourne un dict : { "Tech": 1.2, "Finance": -0.3, ... }
     """
-    sectors = {
-        "Tech":           "XLK",
-        "Finance":        "XLF",
-        "Santé":          "XLV",
-        "Énergie":        "XLE",
-        "Industrie":      "XLI",
-        "Conso. Disc.":   "XLY",
-        "Conso. Staples": "XLP",
-        "Matériaux":      "XLB",
-        "Immobilier":     "XLRE",
-        "Utilities":      "XLU",
-        "Télécom":        "XLC",
-    }
+    frames = get_market_history()
     perf = {}
-    for name, symbol in sectors.items():
-        try:
-            hist = yf.Ticker(symbol).history(period="2d")
-            if len(hist) >= 2:
-                prev_close = hist['Close'].iloc[-2]
-                if prev_close == 0 or pd.isna(prev_close):
-                    continue
-                change = ((hist['Close'].iloc[-1] - prev_close) / prev_close) * 100
-                perf[name] = round(change, 2)
-        except Exception:
-            pass
+    for name, symbol in SECTOR_ETFS.items():
+        change = _day_change_pct(_close(frames, symbol))
+        if change is not None:
+            perf[name] = round(change, 2)
     return perf
 
 
-@st.cache_data(ttl=300)
 def get_yield_curve() -> dict:
     """
-    Récupère les taux des obligations US pour construire la courbe des taux.
+    Taux des obligations US pour la courbe des taux, en %.
     Retourne un dict : { "3M": 5.2, "5Y": 4.8, "10Y": 4.5, "30Y": 4.7 }
     """
-    treasuries = {
-        "3M":  "^IRX",
-        "5Y":  "^FVX",
-        "10Y": "^TNX",
-        "30Y": "^TYX",
-    }
+    frames = get_market_history()
     yields = {}
-    for name, symbol in treasuries.items():
-        try:
-            hist = yf.Ticker(symbol).history(period="1d")
-            if len(hist) > 0:
-                close = _normalize_quote_value(symbol, hist['Close'].iloc[-1])
-                if close is not None:
-                    yields[name] = close
-        except Exception:
-            pass
+    for name, symbol in TREASURY_CURVE.items():
+        last = _latest_valid(_close(frames, symbol))
+        if last is not None:
+            yields[name] = float(last)
     return yields
 
 
@@ -714,56 +868,34 @@ def get_fear_greed_index() -> dict:
     return {}
 
 
-@st.cache_data(ttl=300)
 def get_market_snapshot() -> dict:
     """
     Vue priorisée du marché avec indices, volatilité et actifs de contexte.
     Les indices cash sont approchés via ETF liquides pour pouvoir calculer
     rendement, tendance et BBP de façon homogène.
     """
-    assets = {
-        "S&P 500": {"symbol": "SPY", "category": "Core Equity"},
-        "Nasdaq 100": {"symbol": "QQQ", "category": "Core Equity"},
-        "Dow Jones": {"symbol": "DIA", "category": "Core Equity"},
-        "Russell 2000": {"symbol": "IWM", "category": "Core Equity"},
-        "VIX": {"symbol": "^VIX", "category": "Volatility"},
-        "VIX 3M": {"symbol": "^VIX3M", "category": "Volatility"},
-        "10Y Treasury": {"symbol": "^TNX", "category": "Rates"},
-        "Gold": {"symbol": "GLD", "category": "Cross-Asset"},
-        "US Dollar": {"symbol": "UUP", "category": "Cross-Asset"},
-    }
-
+    frames = get_market_history()
     snapshot = {}
-    for name, meta in assets.items():
+    for name, meta in SNAPSHOT_ASSETS.items():
         symbol = meta["symbol"]
+        hist = frames.get(symbol)
+        if hist is None:
+            continue
         try:
-            hist = yf.Ticker(symbol).history(period="1y")
-            if hist.empty:
-                continue
-
-            close = hist["Close"].copy()
-            if symbol in TREASURY_SYMBOLS:
-                close = close.apply(lambda value: _normalize_quote_value(symbol, value))
-                hist = hist.copy()
-                hist["Close"] = close
-                hist["High"] = hist["High"].apply(lambda value: _normalize_quote_value(symbol, value))
-                hist["Low"] = hist["Low"].apply(lambda value: _normalize_quote_value(symbol, value))
-
+            close = _close(frames, symbol)
             current = _latest_valid(close)
-            prev_close = close.dropna().iloc[-2] if len(close.dropna()) >= 2 else None
+            if current is None:
+                continue
             ma50 = _latest_valid(close.rolling(50).mean())
             ma200 = _latest_valid(close.rolling(200).mean())
             bbp = _compute_bbp_metrics(hist) if symbol not in TREASURY_SYMBOLS else {}
+            change_1d = _day_change_pct(close)
 
-            if current is None:
-                continue
-
-            change_1d = ((current - prev_close) / prev_close * 100) if prev_close not in (None, 0) else None
             snapshot[name] = {
                 "symbol": symbol,
                 "category": meta["category"],
                 "value": float(current),
-                "change_1d": float(change_1d) if change_1d is not None else None,
+                "change_1d": change_1d,
                 "perf_1m": _pct_change_from_lookback(close, 21),
                 "perf_3m": _pct_change_from_lookback(close, 63),
                 "ma50_gap_pct": ((current - ma50) / ma50 * 100) if ma50 not in (None, 0) else None,
@@ -778,43 +910,12 @@ def get_market_snapshot() -> dict:
     return snapshot
 
 
-@st.cache_data(ttl=300)
 def get_market_breadth() -> dict:
     """
     Breadth proxy basé sur les grands ETFs indices/secteurs.
     Permet de lire rapidement si la hausse/baisse est large ou étroite.
     """
-    universe = {
-        "SPY": "S&P 500",
-        "QQQ": "Nasdaq 100",
-        "DIA": "Dow Jones",
-        "IWM": "Russell 2000",
-        "XLK": "Tech",
-        "XLF": "Finance",
-        "XLV": "Santé",
-        "XLI": "Industrie",
-        "XLE": "Énergie",
-        "XLY": "Conso. Disc.",
-        "XLP": "Conso. Staples",
-        "XLB": "Matériaux",
-        "XLU": "Utilities",
-        "XLRE": "Immobilier",
-        "XLC": "Télécom",
-    }
-
-    try:
-        history = yf.download(
-            tickers=list(universe.keys()),
-            period="1y",
-            auto_adjust=False,
-            progress=False,
-            group_by="ticker",
-        )
-    except Exception:
-        return {}
-
-    if history is None or history.empty:
-        return {}
+    frames = get_market_history()
 
     advancers = 0
     decliners = 0
@@ -822,40 +923,31 @@ def get_market_breadth() -> dict:
     above_200 = 0
     rows = []
 
-    for symbol, label in universe.items():
-        try:
-            if isinstance(history.columns, pd.MultiIndex):
-                frame = history[symbol].dropna(how="all")
-                close = frame["Close"].dropna()
-            else:
-                close = history["Close"].dropna()
-
-            if close.empty:
-                continue
-
-            current = close.iloc[-1]
-            previous = close.iloc[-2] if len(close) >= 2 else None
-            ma50 = _latest_valid(close.rolling(50).mean())
-            ma200 = _latest_valid(close.rolling(200).mean())
-            day_change = ((current - previous) / previous * 100) if previous not in (None, 0) else None
-
-            if day_change is not None:
-                advancers += int(day_change > 0)
-                decliners += int(day_change < 0)
-            above_50 += int(ma50 is not None and current > ma50)
-            above_200 += int(ma200 is not None and current > ma200)
-
-            rows.append(
-                {
-                    "Ticker": symbol,
-                    "Name": label,
-                    "1D %": round(day_change, 2) if day_change is not None else None,
-                    "Above 50D": "Yes" if ma50 is not None and current > ma50 else "No",
-                    "Above 200D": "Yes" if ma200 is not None and current > ma200 else "No",
-                }
-            )
-        except Exception:
+    for symbol, label in BREADTH_UNIVERSE.items():
+        close = _close(frames, symbol)
+        if close.empty:
             continue
+
+        current = close.iloc[-1]
+        ma50 = _latest_valid(close.rolling(50).mean())
+        ma200 = _latest_valid(close.rolling(200).mean())
+        day_change = _day_change_pct(close)
+
+        if day_change is not None:
+            advancers += int(day_change > 0)
+            decliners += int(day_change < 0)
+        above_50 += int(ma50 is not None and current > ma50)
+        above_200 += int(ma200 is not None and current > ma200)
+
+        rows.append(
+            {
+                "Ticker": symbol,
+                "Name": label,
+                "1D %": round(day_change, 2) if day_change is not None else None,
+                "Above 50D": "Yes" if ma50 is not None and current > ma50 else "No",
+                "Above 200D": "Yes" if ma200 is not None and current > ma200 else "No",
+            }
+        )
 
     total = len(rows)
     if total == 0:

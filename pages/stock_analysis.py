@@ -118,9 +118,25 @@ if not current_price:
         st.error(f"Prix introuvable pour **{ticker_input}**. Vérifie le symbole (ex: `AAPL`, `MC.PA`).")
     st.stop()
 
-prev_close = info.get("previousClose", current_price)
-price_change = current_price - prev_close
-price_change_pct = (price_change / prev_close) * 100 if prev_close else 0
+prev_close = info.get("previousClose")
+if prev_close:
+    price_change = current_price - prev_close
+    price_change_pct = (price_change / prev_close) * 100
+    price_delta = f"{price_change:+.2f} ({price_change_pct:+.2f}%)"
+else:
+    price_delta = None  # pas de clôture de la veille : on n'affiche pas une fausse variation à 0 %
+
+if info.get("_partial"):
+    reason = (
+        "Yahoo Finance limite temporairement les requêtes depuis le serveur."
+        if info.get("_rate_limited")
+        else "Le profil complet de la société n'a pas pu être chargé depuis Yahoo Finance."
+    )
+    st.warning(
+        f"**Données partielles.** {reason} Prix, technique et états financiers sont affichés ; "
+        "multiples, consensus, earnings et insiders peuvent manquer. Réessaie dans quelques minutes, "
+        "ou lance l'outil en local pour un accès complet."
+    )
 
 col_name, col_price = st.columns([3, 1])
 with col_name:
@@ -134,7 +150,7 @@ with col_price:
     st.metric(
         "Prix actuel",
         f"${current_price:.2f}",
-        delta=f"{price_change:+.2f} ({price_change_pct:+.2f}%)",
+        delta=price_delta,
     )
 
 st.divider()

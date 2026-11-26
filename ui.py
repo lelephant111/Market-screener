@@ -378,7 +378,10 @@ def parse_ticker_list(raw: str) -> list:
 
 
 def build_snapshot_row(ticker: str):
-    info = get_stock_info(ticker)
+    try:
+        info = get_stock_info(ticker)
+    except Exception:
+        return None  # ticker introuvable ou Yahoo indisponible : on saute la ligne sans planter la page
     current_price = info.get("currentPrice") or info.get("regularMarketPrice")
     if not current_price:
         return None

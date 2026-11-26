@@ -21,9 +21,9 @@ L'application doit être :
 - Workflow mise à jour : modifier localement → `git add . && git commit -m "..." && git push` → Streamlit Cloud redéploie automatiquement
 
 ### Stack
-- Python 3.9
+- Python 3.11 (voir `runtime.txt`)
 - Streamlit
-- yfinance 1.2.0
+- yfinance 1.8.0
 - pandas
 - plotly
 - requests
@@ -336,8 +336,16 @@ La persistance locale reste légère :
 ### Règles importantes
 - toujours gérer `None`, `NaN`, DataFrame vide
 - mettre en cache avec `@st.cache_data`
+- ne jamais mettre en cache un échec Yahoo : les fonctions `_fetch_*` (cachées) lèvent une erreur, les fonctions `get_*` (publiques) l'attrapent et renvoient une valeur vide
+- Streamlit Cloud est souvent bloqué par Yahoo ("Too Many Requests") : afficher un message clair plutôt que des N/A silencieux
+- les taux US Yahoo (^IRX, ^FVX, ^TNX, ^TYX) sont déjà en %
 - ne pas faire de logique de données complexe directement dans les pages si elle peut vivre dans `data.py`
 - garder l'interface lisible avant de la rendre plus “riche”
+
+### Tests
+- `pip install -r requirements-dev.txt` puis `python -m pytest -q`
+- `tests/test_pages_smoke.py` fait tourner chaque page avec de fausses données, dans 2 scénarios : Yahoo OK et Yahoo bloqué
+- lancer les tests avant chaque push
 
 ### Philosophie produit
 Le but n'est pas de faire une app “jolie mais vide”.
