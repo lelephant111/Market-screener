@@ -19,7 +19,7 @@ from data import (
     search_tickers,
 )
 from ui import C, card, page_hero, table, val_color
-from utils import compute_scores, compute_zacks_ratings, fmt, fmt_large, fmt_pct
+from utils import amount_currency, compute_scores, compute_zacks_ratings, fmt, fmt_large, fmt_pct, fmt_price
 
 
 page_hero(
@@ -118,6 +118,10 @@ if not current_price:
         st.error(f"Prix introuvable pour **{ticker_input}**. Vérifie le symbole (ex: `AAPL`, `MC.PA`).")
     st.stop()
 
+# Devise de cotation (cours) et devise des comptes (CA, EBITDA, dette...)
+currency = info.get("currency") or "USD"
+fin_currency = info.get("financialCurrency") or amount_currency(currency)
+
 prev_close = info.get("previousClose")
 if prev_close:
     price_change = current_price - prev_close
@@ -128,7 +132,7 @@ else:
 
 if info.get("_partial"):
     reason = (
-        "Yahoo Finance limite temporairement les requêtes depuis le serveur."
+        "Yahoo Finance refuse ou limite les requêtes depuis le serveur."
         if info.get("_rate_limited")
         else "Le profil complet de la société n'a pas pu être chargé depuis Yahoo Finance."
     )
@@ -149,7 +153,7 @@ with col_name:
 with col_price:
     st.metric(
         "Prix actuel",
-        f"${current_price:.2f}",
+        fmt_price(current_price, currency),
         delta=price_delta,
     )
 
@@ -163,6 +167,8 @@ with st.spinner("Calcul des ratings..."):
 
 
 def _to_grade_color(score):
+    if score is None:
+        return "N/A"
     if score >= 80:
         return "A"
     if score >= 60:
@@ -174,8 +180,8 @@ def _to_grade_color(score):
     return "F"
 
 
-GRADE_COLOR = {"A": "#3fb950", "B": "#7ee787", "C": "#d29922", "D": "#e07046", "F": "#f85149"}
-GRADE_LABEL = {"A": "Strong", "B": "Good", "C": "Neutral", "D": "Weak", "F": "Very Weak"}
+GRADE_COLOR = {"A": "#3fb950", "B": "#7ee787", "C": "#d29922", "D": "#e07046", "F": "#f85149", "N/A": "#6B7FA0"}
+GRADE_LABEL = {"A": "Strong", "B": "Good", "C": "Neutral", "D": "Weak", "F": "Very Weak", "N/A": "Pas de données"}
 
 
 def grade_cell(data, size="24px"):
@@ -188,6 +194,8 @@ def grade_cell(data, size="24px"):
 
 
 def score_bar(score, width=60):
+    if score is None:
+        return '<span style="font-size:11px;color:#6B7FA0;">N/A</span>'
     fill = GRADE_COLOR[_to_grade_color(score)]
     return (
         f'<div style="display:inline-flex;align-items:center;gap:6px;">'
@@ -260,11 +268,11 @@ with col_a:
 with col_b:
     pb = info.get("priceToBook")
     st.markdown(card("Taille & Structure", table([
-        ("Market Cap", fmt_large(info.get("marketCap")), C["text"]),
-        ("Enterprise Value", fmt_large(info.get("enterpriseValue")), C["text"]),
-        ("Revenue (TTM)", fmt_large(info.get("totalRevenue")), C["text"]),
-        ("EBITDA", fmt_large(info.get("ebitda")), C["text"]),
-        ("Free Cash Flow", fmt_large(info.get("freeCashflow")), C["green"] if info.get("freeCashflow") and info.get("freeCashflow") > 0 else C["red"] if info.get("freeCashflow") is not None else C["muted"]),
+        ("Market Cap", fmt_large(info.get("marketCap"), currency), C["text"]),
+        ("Enterprise Value", fmt_large(info.get("enterpriseValue"), currency), C["text"]),
+        ("Revenue (TTM)", fmt_large(info.get("totalRevenue"), fin_currency), C["text"]),
+        ("EBITDA", fmt_large(info.get("ebitda"), fin_currency), C["text"]),
+        ("Free Cash Flow", fmt_large(info.get("freeCashflow"), fin_currency), C["green"] if info.get("freeCashflow") and info.get("freeCashflow") > 0 else C["red"] if info.get("freeCashflow") is not None else C["muted"]),
         ("P/B Ratio", fmt(pb, "x"), val_color(pb, True, (1, 3, 5))),
     ])), unsafe_allow_html=True)
 
@@ -306,8 +314,8 @@ with col_e:
         ("Debt / Equity", fmt(de, "%", decimals=0), val_color(de, True, (30, 80, 150))),
         ("Current Ratio", fmt(cr), val_color(cr, False, (0, 1, 1.5))),
         ("Quick Ratio", fmt(qr), val_color(qr, False, (0, 0.8, 1.2))),
-        ("Cash & Équivalents", fmt_large(cash), C["green"] if cash else C["muted"]),
-        ("Total Debt", fmt_large(debt), C["red"] if debt else C["muted"]),
+        ("Cash & Équivalents", fmt_large(cash, fin_currency), C["green"] if cash else C["muted"]),
+        ("Total Debt", fmt_large(debt, fin_currency), C["red"] if debt else C["muted"]),
     ])), unsafe_allow_html=True)
 
 with col_f:
@@ -324,9 +332,9 @@ with col_f:
         ("Short % of Float", f"{short_float * 100:.1f}%" if short_float else "N/A", val_color(short_float, True, (0.05, 0.10, 0.20))),
         ("Short Ratio", fmt(short_ratio, " days", decimals=1), C["muted"]),
         ("Beta (1Y)", fmt(beta), C["orange"] if beta and beta > 1.5 else C["text"]),
-        ("52w High", f"${high_52w:.2f}" if high_52w else "N/A", C["muted"]),
-        ("52w Low", f"${low_52w:.2f}" if low_52w else "N/A", C["muted"]),
-        ("Position 52w", f"{pct_52w:.0f}%" if pct_52w else "N/A", val_color(pct_52w, False, (0, 30, 60))),
+        ("52w High", fmt_price(high_52w, currency), C["muted"]),
+        ("52w Low", fmt_price(low_52w, currency), C["muted"]),
+        ("Position 52w", f"{pct_52w:.0f}%" if pct_52w is not None else "N/A", val_color(pct_52w, False, (0, 30, 60))),
     ])), unsafe_allow_html=True)
 
 st.markdown("<br>", unsafe_allow_html=True)
@@ -360,11 +368,11 @@ ec1.metric(
 
 t_eps = info.get("trailingEps")
 f_eps = info.get("forwardEps")
-ec2.metric("EPS (TTM)", f"${t_eps:.2f}" if t_eps else "N/A")
-ec3.metric("EPS Forward", f"${f_eps:.2f}" if f_eps else "N/A")
+ec2.metric("EPS (TTM)", fmt_price(t_eps, fin_currency))
+ec3.metric("EPS Forward", fmt_price(f_eps, fin_currency))
 rev_est = calendar.get("Revenue Average") or calendar.get("Revenue Estimate")
 rev_est = first_scalar(rev_est)
-ec4.metric("Rev. Estimate", fmt_large(rev_est) if rev_est is not None else "N/A")
+ec4.metric("Rev. Estimate", fmt_large(rev_est, fin_currency))
 
 if earnings_h is not None and not earnings_h.empty:
     needed = ["epsActual", "epsEstimate"]
@@ -422,11 +430,11 @@ with col_targets:
     upside = ((target_mean - current_price) / current_price * 100) if target_mean else None
 
     st.markdown(card("Prix Cibles", table([
-        ("Prix actuel", f"${current_price:.2f}", C["text"]),
-        ("Cible moyenne", f"${target_mean:.2f}" if target_mean else "N/A", C["green"] if upside and upside > 0 else C["red"] if upside else C["muted"]),
+        ("Prix actuel", fmt_price(current_price, currency), C["text"]),
+        ("Cible moyenne", fmt_price(target_mean, currency), C["green"] if upside and upside > 0 else C["red"] if upside else C["muted"]),
         ("Upside / Downside", f"{upside:+.1f}%" if upside is not None else "N/A", C["green"] if upside and upside > 0 else C["red"] if upside else C["muted"]),
-        ("Cible haute", f"${target_high:.2f}" if target_high else "N/A", C["muted"]),
-        ("Cible basse", f"${target_low:.2f}" if target_low else "N/A", C["muted"]),
+        ("Cible haute", fmt_price(target_high, currency), C["muted"]),
+        ("Cible basse", fmt_price(target_low, currency), C["muted"]),
     ])), unsafe_allow_html=True)
 
 st.divider()
@@ -437,18 +445,28 @@ with st.spinner("Chargement des transactions insiders..."):
 
 if insiders_df is not None and not insiders_df.empty:
     df_ins = insiders_df.copy()
-    tx_col = next((c for c in df_ins.columns if "trans" in c.lower()), None)
-    shares_col = next((c for c in df_ins.columns if "share" in c.lower()), None)
+
+    # Colonnes yfinance : "Start Date" (date), "Text" (ex : "Sale at price 230.50 per share"),
+    # "Transaction" (souvent vide), "Shares", "Value", "Insider", "Position"
+    def _tx_label(row):
+        return f"{row.get('Transaction') or ''} {row.get('Text') or ''}".strip()
+
+    df_ins["_label"] = df_ins.apply(_tx_label, axis=1)
+    if "Start Date" in df_ins.columns:
+        df_ins["_date"] = pd.to_datetime(df_ins["Start Date"], errors="coerce")
+    else:
+        df_ins["_date"] = pd.to_datetime(df_ins.index, errors="coerce")
 
     net_signal = None
-    if tx_col and shares_col:
+    if "Shares" in df_ins.columns:
         try:
-            df_ins["_date"] = pd.to_datetime(df_ins.index, errors="coerce")
             three_months_ago = pd.Timestamp.today() - pd.DateOffset(months=3)
             recent = df_ins[df_ins["_date"] >= three_months_ago]
-            if not recent.empty:
-                buys = recent[recent[tx_col].str.contains("Buy|Purchase", case=False, na=False)][shares_col].sum()
-                sales = recent[recent[tx_col].str.contains("Sale|Sell", case=False, na=False)][shares_col].sum()
+            is_buy = recent["_label"].str.contains("Buy|Purchase", case=False, na=False)
+            is_sale = recent["_label"].str.contains("Sale|Sell", case=False, na=False)
+            buys = pd.to_numeric(recent.loc[is_buy, "Shares"], errors="coerce").sum()
+            sales = pd.to_numeric(recent.loc[is_sale, "Shares"], errors="coerce").sum()
+            if buys or sales:
                 net_signal = "Net Buyer" if buys > sales else "Net Seller"
         except Exception:
             pass
@@ -464,26 +482,16 @@ if insiders_df is not None and not insiders_df.empty:
             unsafe_allow_html=True,
         )
 
-    display_cols = {}
-    col_map = {
-        "Insider": ["Insider", "insider", "Name"],
-        "Position": ["Position", "position", "Title"],
-        "Transaction": ["Transaction", "transaction", "Type"],
-        "Shares": ["Shares", "shares"],
-        "Value": ["Value", "value"],
-    }
-    for friendly, candidates in col_map.items():
-        found = next((c for c in candidates if c in df_ins.columns), None)
-        if found:
-            display_cols[found] = friendly
-
-    if display_cols:
-        show = df_ins[list(display_cols.keys())].rename(columns=display_cols).head(8)
-        if "Value" in show.columns:
-            show["Value"] = show["Value"].apply(lambda v: fmt_large(v) if isinstance(v, (int, float)) else v)
-        st.dataframe(show, width='stretch', hide_index=False)
-    else:
-        st.dataframe(df_ins.head(8), width='stretch')
+    show = pd.DataFrame({
+        "Date": df_ins["_date"].dt.strftime("%d/%m/%Y"),
+        "Insider": df_ins.get("Insider"),
+        "Position": df_ins.get("Position"),
+        "Opération": df_ins["_label"],
+        "Shares": df_ins.get("Shares"),
+        "Value": df_ins["Value"].apply(lambda v: fmt_large(v, currency) if isinstance(v, (int, float)) else v)
+        if "Value" in df_ins.columns else None,
+    }).dropna(axis=1, how="all").head(8)
+    st.dataframe(show, width='stretch', hide_index=True)
 else:
     st.caption("Données insiders non disponibles.")
 

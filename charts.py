@@ -34,32 +34,6 @@ BASE_LAYOUT = dict(
 )
 
 
-def candlestick_chart(history: pd.DataFrame, ticker: str) -> go.Figure:
-    """
-    Graphique en chandeliers japonais (OHLC).
-    history : DataFrame avec colonnes Open, High, Low, Close
-    """
-    fig = go.Figure()
-    fig.add_trace(go.Candlestick(
-        x=history.index,
-        open=history['Open'],
-        high=history['High'],
-        low=history['Low'],
-        close=history['Close'],
-        name=ticker,
-        increasing_line_color=COLORS["green"],
-        decreasing_line_color=COLORS["red"],
-    ))
-    fig.update_layout(
-        **BASE_LAYOUT,
-        height=420,
-        xaxis_rangeslider_visible=False,
-        xaxis=dict(showgrid=False),
-        yaxis=dict(showgrid=True, gridcolor=COLORS["grid"]),
-    )
-    return fig
-
-
 def sector_bar_chart(sector_perf: dict) -> go.Figure:
     """
     Graphique à barres horizontal pour la performance sectorielle.
@@ -200,10 +174,15 @@ def scorecard_chart(scores: dict) -> go.Figure:
     L'intensité de la couleur augmente avec la distance au centre.
     """
     labels = [d['label'] for d in scores.values()]
-    values = [d['score'] if d['score'] is not None else 5.0 for d in scores.values()]
+    raw = [d['score'] for d in scores.values()]
+    # Pas de donnée : petite barre grise "N/A" plutôt qu'une fausse note neutre à 5
+    values = [v if v is not None else 0.4 for v in raw]
 
     colors = []
-    for v in values:
+    for r, v in zip(raw, values):
+        if r is None:
+            colors.append("rgba(107, 127, 160, 0.35)")             # gris
+            continue
         intensity = abs(v - 5) / 5      # 0.0 (neutre) → 1.0 (extrême)
         opacity   = 0.35 + 0.65 * intensity
         if v >= 5:
@@ -217,10 +196,10 @@ def scorecard_chart(scores: dict) -> go.Figure:
         y=values,
         marker_color=colors,
         marker_line_width=0,
-        text=[f"<b>{v:.1f}</b>" for v in values],
+        text=[f"<b>{r:.1f}</b>" if r is not None else "N/A" for r in raw],
         textposition="outside",
         textfont=dict(color=COLORS["text"], size=13),
-        hovertemplate="%{x} : %{y}/10<extra></extra>",
+        hovertemplate="%{x} : %{text}<extra></extra>",
     ))
 
     # Ligne horizontale de référence à 5
@@ -242,14 +221,12 @@ def profitability_chart(gross, operating, net, roe, roa) -> go.Figure:
     Toutes les valeurs sont affichées en % sur le même axe.
     """
     labels = ['ROA', 'ROE', 'Net Margin', 'Operating Margin', 'Gross Margin']
-    values = [
-        (roa or 0) * 100,
-        (roe or 0) * 100,
-        (net or 0) * 100,
-        (operating or 0) * 100,
-        (gross or 0) * 100,
-    ]
-    colors = [COLORS["green"] if v > 0 else COLORS["red"] for v in values]
+    raw = [roa, roe, net, operating, gross]
+    missing = [r is None or (isinstance(r, float) and r != r) for r in raw]
+    # Donnée absente : barre vide avec "N/A", et non une marge à 0 %
+    values = [0.0 if m else r * 100 for r, m in zip(raw, missing)]
+    colors = [COLORS["gray"] if m else COLORS["green"] if v > 0 else COLORS["red"]
+              for v, m in zip(values, missing)]
 
     fig = go.Figure(go.Bar(
         x=values,
@@ -257,7 +234,7 @@ def profitability_chart(gross, operating, net, roe, roa) -> go.Figure:
         orientation='h',
         marker_color=colors,
         marker_line_width=0,
-        text=[f"{v:.1f}%" for v in values],
+        text=["N/A" if m else f"{v:.1f}%" for v, m in zip(values, missing)],
         textposition='outside',
         textfont=dict(size=12, color=COLORS["text"]),
     ))
@@ -284,9 +261,16 @@ def earnings_chart(df: "pd.DataFrame") -> go.Figure:
     df = df.tail(4).copy()
     quarters = [str(d)[:7] for d in df.index]   # format "2024-09"
 
-    actual   = df['epsActual'].tolist()
-    estimate = df['epsEstimate'].tolist()
-    surprise = df['surprisePercent'].tolist() if 'surprisePercent' in df.columns else [None] * len(df)
+    def _clean(values):
+        return [None if v is None or pd.isna(v) else float(v) for v in values]
+
+    actual   = _clean(df['epsActual'].tolist())
+    estimate = _clean(df['epsEstimate'].tolist())
+    # surprisePercent est en décimal chez Yahoo (0.045 = +4.5 %)
+    surprise = (
+        [None if v is None else v * 100 for v in _clean(df['surprisePercent'].tolist())]
+        if 'surprisePercent' in df.columns else [None] * len(df)
+    )
 
     # Couleur de la barre Actual selon beat (vert) ou miss (rouge)
     act_colors = []
@@ -323,7 +307,7 @@ def earnings_chart(df: "pd.DataFrame") -> go.Figure:
     fig.update_layout(
         margin=dict(l=0, r=10, t=20, b=0),
         xaxis=dict(showgrid=False),
-        yaxis=dict(showgrid=True, gridcolor=COLORS["grid"], title="EPS ($)"),
+        yaxis=dict(showgrid=True, gridcolor=COLORS["grid"], title="EPS"),
         legend=dict(orientation='h', y=1.12, x=0, bgcolor='rgba(0,0,0,0)', font=dict(size=11)),
     )
     return fig
@@ -450,42 +434,4 @@ def relative_performance_chart(df_a: pd.DataFrame, df_b: pd.DataFrame, ticker_a:
     fig.update_yaxes(title="Ratio", showgrid=True, gridcolor=COLORS["grid"], row=2, col=1)
     fig.update_xaxes(showgrid=False, row=1, col=1)
     fig.update_xaxes(showgrid=False, row=2, col=1)
-    return fig
-
-
-def screener_scatter_chart(df: pd.DataFrame) -> go.Figure:
-    """
-    Scatter simple pour le screener :
-    croissance du CA vs P/E forward, taille = market cap.
-    """
-    fig = go.Figure()
-
-    fig.add_trace(go.Scatter(
-        x=df["Revenue Growth (%)"],
-        y=df["Forward P/E"],
-        mode='markers+text',
-        text=df["Ticker"],
-        textposition='top center',
-        marker=dict(
-            size=df["Bubble Size"],
-            color=df["1D Change (%)"],
-            colorscale=[[0, COLORS["red"]], [0.5, "#d29922"], [1, COLORS["green"]]],
-            colorbar=dict(
-                title=dict(text="Perf 1D", font=dict(color=COLORS["text"])),
-                tickfont=dict(color=COLORS["text"]),
-            ),
-            showscale=True,
-            line=dict(color="#111", width=1),
-            opacity=0.85,
-        ),
-        hovertemplate="<b>%{text}</b><br>Growth: %{x:.1f}%<br>Forward P/E: %{y:.1f}x<extra></extra>",
-    ))
-
-    fig.update_layout(
-        **BASE_LAYOUT,
-        height=420,
-        xaxis=dict(title="Revenue Growth (%)", showgrid=False),
-        yaxis=dict(title="Forward P/E", showgrid=True, gridcolor=COLORS["grid"]),
-    )
-    fig.update_layout(margin=dict(l=0, r=0, t=20, b=0))
     return fig

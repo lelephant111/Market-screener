@@ -76,6 +76,7 @@ def make_ticker_class(mode: str):
                 _blocked()
             return {
                 "longName": f"{self.symbol} Corp", "sector": "Industrials", "industry": "Aerospace",
+                "currency": "EUR" if self.symbol.endswith(".PA") else "USD",
                 "exchange": "PAR", "currentPrice": 233.9, "previousClose": 230.0,
                 "trailingPE": 25.0, "forwardPE": 21.0, "enterpriseToEbitda": 14.0,
                 "marketCap": 48e9, "totalRevenue": 22e9, "grossMargins": 0.26,
@@ -109,7 +110,17 @@ def make_ticker_class(mode: str):
         def insider_transactions(self):
             if blocked:
                 _blocked()
-            return pd.DataFrame()
+            today = pd.Timestamp.today().normalize()
+            return pd.DataFrame({
+                "Shares": [10_000, 2_000],
+                "Value": [2_300_000, 460_000],
+                "Text": ["Sale at price 230.00 per share.", "Purchase at price 230.00 per share."],
+                "Insider": ["DOE JOHN", "SMITH JANE"],
+                "Position": ["CEO", "Director"],
+                "Transaction": ["", ""],
+                "Start Date": [today - pd.Timedelta(days=10), today - pd.Timedelta(days=20)],
+                "Ownership": ["D", "D"],
+            })
 
         @property
         def calendar(self):
@@ -217,6 +228,13 @@ def test_stock_analysis(yahoo):
     assert price.delta and "+0.00 (+0.00%)" not in price.delta, "la variation du jour doit être calculée"
     has_warning = any("Données partielles" in w.value for w in at.warning)
     assert has_warning == (yahoo == "blocked")
+    # Thales cote en euros : le prix ne doit pas s'afficher en dollars
+    assert price.value.startswith("€"), price.value
+    text = all_text(at)
+    if yahoo == "ok":
+        assert "Net Seller" in text  # 10 000 titres vendus contre 2 000 achetés sur 3 mois
+    else:
+        assert "Pas de données" in text  # rating Value sans aucun multiple : N/A, pas "C Neutral"
 
 
 def test_market_overview(yahoo):
@@ -226,6 +244,8 @@ def test_market_overview(yahoo):
     assert "10Y Treasury" in text
     row = text.split("10Y Treasury")[1][:300]
     assert ">4." in row or ">5." in row, row
+    indices = at.dataframe[0].value
+    assert indices["Index"].iloc[0] == "S&P 500 (SPY)"  # prix d'ETF, clairement étiqueté
 
 
 def test_screener(yahoo):
@@ -235,7 +255,7 @@ def test_screener(yahoo):
     at.button[0].click().run()
     assert not at.exception, [e.value for e in at.exception]
     if yahoo == "blocked":
-        assert any("limite temporairement" in e.value for e in at.error)
+        assert any("refuse les requêtes" in e.value for e in at.error)
     else:
         assert not at.error
         assert at.dataframe

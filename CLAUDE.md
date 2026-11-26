@@ -121,7 +121,6 @@ Contient notamment :
 - secteurs
 - courbe des taux
 - performance relative
-- screener scatter
 
 ### `utils.py`
 Rôle :
@@ -245,8 +244,7 @@ Pour chacun :
 Fonctionnalités actuelles :
 - liste custom de tickers
 - filtres simples
-- tableau de résultats
-- scatter de screening
+- tableau de résultats (tri selon le choix "Trier par")
 - ouverture rapide d'un ticker dans `Stock Analysis`
 
 ### 5. Relative Performance
@@ -268,7 +266,24 @@ Fonctionnalités actuelles :
 
 ---
 
-## Ce Qui A Été Fait Récemment (2026-04-22)
+## Ce Qui A Été Fait Récemment (2026-11-26)
+
+### Lot 1 : données Yahoo
+- yfinance 1.8.0, échecs Yahoo jamais mis en cache, un nouvel essai automatique
+- Market Overview : un seul téléchargement groupé
+- bandeau "Données partielles" quand Yahoo bloque le profil d'une société
+- constat : Yahoo bloque Streamlit Cloud (429 / 401) pour les profils, consensus, earnings et le screener ; en local tout fonctionne
+
+### Lot 2 : affichage et calculs
+- devises : prix et montants dans la devise du titre (€, £, pence...), plus de "$" partout
+- donnée absente = "N/A", jamais une note neutre (ratings, scorecard, marges)
+- indices de Market Overview étiquetés avec leur ETF (prix de SPY, pas du S&P 500)
+- surprise EPS en % (Yahoo la renvoie en décimal)
+- signal insiders Net Buyer / Net Seller réparé (colonnes "Start Date" et "Text")
+- Screener : "Europe" inclut le Royaume-Uni, le tri choisi est respecté
+- montants négatifs formatés, code mort supprimé
+
+## Fait Le 2026-04-22
 
 ### Design Bloomberg
 - Thème complet refait : fond noir #060B14, accent orange #FF6600, font monospace
@@ -284,8 +299,8 @@ Fonctionnalités actuelles :
 - Fix fallback prix yfinance : si `currentPrice` absent → `fast_info.last_price` → historique 2J
 
 ### Screener
-- Univers dynamique via `yfinance.EquityQuery` + `screen()` (yfinance 1.2.0)
-- Régions : Europe, Europe ex-UK + 13 pays individuels
+- Univers dynamique via `yfinance.EquityQuery` + `screen()`
+- Régions : Europe (avec UK), Europe ex-UK + pays individuels
 - Filtrage post-API bonds (% dans nom), listings secondaires, market cap < 500M
 - Tri par volume local pour marchés européens (évite les cross-listings US)
 - Filtres avancés : P/E max, market cap min, perf 52S min, variation 1J min
@@ -345,6 +360,7 @@ La persistance locale reste légère :
 ### Tests
 - `pip install -r requirements-dev.txt` puis `python -m pytest -q`
 - `tests/test_pages_smoke.py` fait tourner chaque page avec de fausses données, dans 2 scénarios : Yahoo OK et Yahoo bloqué
+- `tests/test_logic.py` vérifie les calculs et formats (devises, N/A, tri, surprise EPS)
 - lancer les tests avant chaque push
 
 ### Philosophie produit

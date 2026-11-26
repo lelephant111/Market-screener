@@ -62,7 +62,7 @@ TOOLS = [
     {
         "icon": "◫",
         "title": "SCREENER",
-        "desc": "Filtrage multi-critères · Scatter · Accès rapide",
+        "desc": "Univers Europe / monde · Filtres · Accès rapide",
         "page": SCREENER_PAGE,
     },
     {
@@ -102,5 +102,5 @@ for i, tool in enumerate(TOOLS):
             """,
             unsafe_allow_html=True,
         )
-        if st.button(f"OUVRIR", key=f"nav_{i}", width='stretch'):
+        if st.button("OUVRIR", key=f"nav_{i}", width='stretch'):
             open_page(tool["page"])

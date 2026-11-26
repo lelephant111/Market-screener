@@ -396,12 +396,13 @@ def build_snapshot_row(ticker: str):
         "Ticker": ticker,
         "Name": info.get("longName", ticker),
         "Price": round(current_price, 2),
+        "Currency": info.get("currency") or "USD",
         "1D Change (%)": round(change_pct, 2),
         "Forward P/E": info.get("forwardPE"),
-        "Revenue Growth (%)": (info.get("revenueGrowth") or 0) * 100,
-        "Net Margin (%)": (info.get("profitMargins") or 0) * 100,
+        "Revenue Growth (%)": info["revenueGrowth"] * 100 if info.get("revenueGrowth") is not None else None,
+        "Net Margin (%)": info["profitMargins"] * 100 if info.get("profitMargins") is not None else None,
         "Debt / Equity": info.get("debtToEquity"),
-        "Market Cap ($B)": round((market_cap or 0) / 1e9, 2) if market_cap else None,
+        "Market Cap": market_cap,
         "Bubble Size": bubble_size,
     }
 
